@@ -421,9 +421,8 @@ CPU_EntryPoint:
 
 	; Write 0's across all of VRAM
 	move.w #($00010000/size_word)-1, d0	; Loop counter = 64kb, in words (-1 for DBRA loop)
-	ClrVramLp:								; Start of loop
-	move.w #$0, vdp_data					; Write a $0000 (word size) to VRAM
-	dbra   d0, ClrVramLp					; Decrement d0 and loop until finished (when d0 reaches -1)
+-	move.w #$0, vdp_data					; Write a $0000 (word size) to VRAM
+	dbra   d0, -					; Decrement d0 and loop until finished (when d0 reaches -1)
 	
 	;==============================================================
 	; Initialise status register and set interrupt level.
@@ -441,9 +440,8 @@ CPU_EntryPoint:
 	; Write the palette to CRAM
 	lea    Palette, a0				; Move palette address to a0
 	move.w #size_palette_w-1, d0	; Loop counter = 8 words in palette (-1 for DBRA loop)
-	PalLp:							; Start of loop
-	move.w (a0)+, vdp_data			; Write palette entry, post-increment address
-	dbra d0, PalLp					; Decrement d0 and loop until finished (when d0 reaches -1)
+-	move.w (a0)+, vdp_data			; Write palette entry, post-increment address
+	dbra d0, -					; Decrement d0 and loop until finished (when d0 reaches -1)
 	
 	;==============================================================
 	; Write the font tiles to VRAM
@@ -455,9 +453,8 @@ CPU_EntryPoint:
 	; Write the font glyph tiles to VRAM
 	lea    CharacterSpace, a0					; Move the address of the first graphics tile into a0
 	move.w #(tile_count*size_tile_l)-1, d0		; Loop counter = 8 longwords per tile * num tiles (-1 for DBRA loop)
-	CharLp:									; Start of loop
-	move.l (a0)+, vdp_data						; Write tile line (4 bytes per line), and post-increment address
-	dbra d0, CharLp							; Decrement d0 and loop until finished (when d0 reaches -1)
+-	move.l (a0)+, vdp_data						; Write tile line (4 bytes per line), and post-increment address
+	dbra d0, -							; Decrement d0 and loop until finished (when d0 reaches -1)
 	
 	;==============================================================
 	; Write the tile IDs of "HELLO WORLD" to Plane A's cell grid
@@ -514,8 +511,7 @@ CPU_EntryPoint:
 	; still continue to run (and fire vertical/horizontal interrupts)
 	; of its own accord, so it will continue to render our Hello World
 	; even though the CPU is stuck in this loop.
-	InfiniteLp:
-	bra InfiniteLp
+-	bra -
 	
 ;==============================================================
 ; INTERRUPT ROUTINES
@@ -566,12 +562,10 @@ VDP_WriteTMSS:
 
 	move.b hardware_ver_address, d0			; Move Megadrive hardware version to d0
 	andi.b #$0F, d0						; The version is stored in last four bits, so mask it with 0F
-	beq    SkipTMSS						; If version is equal to 0, skip TMSS signature
+	beq    +						; If version is equal to 0, skip TMSS signature
 	move.l #tmss_signature, tmss_address	; Move the string "SEGA" to $A14000
-	SkipTMSS:
-
 	; Check VDP
-	move.w vdp_control, d0					; Read VDP status register (hangs if no access)
++	move.w vdp_control, d0					; Read VDP status register (hangs if no access)
 	
 	rts
 
@@ -594,11 +588,10 @@ VDP_LoadRegisters:
 	move.w #$18-1, d0			; 24 registers to write (-1 for loop counter)
 	move.w #$8000, d1			; 'Set register 0' command to d1
 
-	CopyRegLp:
-	move.b (a0)+, d1			; Move register value from table to lower byte of d1 (and post-increment the table address for next time)
+- move.b (a0)+, d1			; Move register value from table to lower byte of d1 (and post-increment the table address for next time)
 	move.w d1, vdp_control		; Write command and value to VDP control port
 	addi.w #$0100, d1			; Increment register #
-	dbra   d0, CopyRegLp		; Decrement d0, and jump back to top of loop if d0 is still >= 0
+	dbra   d0, -		; Decrement d0, and jump back to top of loop if d0 is still >= 0
 	
 	rts
 
