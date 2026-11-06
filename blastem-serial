@@ -1,0 +1,108 @@
+#!/bin/bash
+# Run a ROM in BlastEm with controller port 2 acting as a serial UART, and expose that UART as a
+# pty so e4thcom (forth-connect) opens it like a real serial port.
+# Usage: blastem-serial ROM.bin | blastem-serial status | blastem-serial stop
+#
+#   ROM <-> BlastEm "serial" device <-unix socket-> socat <-> pty /tmp/blastforth-tty <-> e4thcom
+#
+# Needs: socat (sudo apt install socat).
+
+DIR=/tmp/blastforth-emu
+SOCK=$DIR/blastem.sock
+TTY=/tmp/blastforth-tty   # forth-connect passes ../tmp/blastforth-tty because e4thcom prepends /dev/
+BLASTEM=${BLASTEM:-$HOME/bin/blastem64/blastem}
+
+# alive NAME: is the process recorded in $DIR/NAME.pid still running?
+alive() {
+  [ -f "$DIR/$1.pid" ] && kill -0 "$(cat "$DIR/$1.pid")" 2>/dev/null
+}
+
+stop() {
+  # BlastEm first: SIGTERM lets it unlink its socket. socat then sees EOF and exits.
+  for p in blastem socat hold; do
+    if alive $p; then
+      pid=$(cat "$DIR/$p.pid")
+      kill "$pid"
+      # SDL turns SIGTERM into a quit event. A BlastEm stuck in a blocking socket call (no serial
+      # client left, e.g. after socat died) never handles it, so wait briefly and then force it.
+      for i in 1 2 3 4 5 6 7 8 9 10; do
+        kill -0 "$pid" 2>/dev/null || break
+        sleep 0.2
+      done
+      kill -0 "$pid" 2>/dev/null && kill -9 "$pid"
+    fi
+    rm -f "$DIR/$p.pid"
+  done
+  rm -f "$TTY" "$SOCK"
+}
+
+case "$1" in
+  stop)
+    stop
+    echo "stopped"
+    exit 0
+    ;;
+  status)
+    for p in blastem socat hold; do
+      alive $p && echo "$p running (pid $(cat "$DIR/$p.pid"))" || echo "$p not running"
+    done
+    exit 0
+    ;;
+  ""|-h|--help)
+    echo "Usage: $0 ROM.bin | status | stop"
+    exit 1
+    ;;
+esac
+
+ROM=$1
+[ -f "$ROM" ] || { echo "ERROR: ROM not found: $ROM"; exit 1; }
+alive blastem && { echo "ERROR: already running; '$0 stop' first"; exit 1; }
+command -v socat >/dev/null || { echo "ERROR: socat not installed (sudo apt install socat)"; exit 1; }
+
+# Private HOME so ~/.config/blastem (and any BlastEm you have open) is untouched.
+mkdir -p "$DIR/home/.config/blastem"
+cat > "$DIR/home/.config/blastem/blastem.cfg" <<EOF
+video {
+	vsync on
+}
+io {
+	devices {
+		2 serial
+	}
+	socket $SOCK
+}
+EOF
+# vsync on: BlastEm's default (off) is rejected under Wayland.
+# devices 2 serial: UART registers on controller port 2 ($A10015 Tx, $A10017 Rx, $A10019 S-Ctrl).
+# socket: BlastEm listens here and accepts a single client; only one port can be serial.
+
+rm -f "$SOCK"   # a stale file from a crash makes BlastEm's bind() fail
+HOME="$DIR/home" setsid "$BLASTEM" "$ROM" >"$DIR/blastem.log" 2>&1 </dev/null &
+echo $! > "$DIR/blastem.pid"
+
+for i in $(seq 50); do
+  [ -S "$SOCK" ] && break
+  alive blastem || { echo "ERROR: BlastEm exited; see $DIR/blastem.log"; exit 1; }
+  sleep 0.2
+done
+[ -S "$SOCK" ] || { echo "ERROR: no serial socket; see $DIR/blastem.log"; stop; exit 1; }
+
+# raw,echo=0: the ROM alone echoes, as on hardware. retry: the socket file appears just before listen().
+setsid socat "PTY,link=$TTY,raw,echo=0" "UNIX-CONNECT:$SOCK,retry=20,interval=0.2" \
+  >"$DIR/socat.log" 2>&1 </dev/null &
+echo $! > "$DIR/socat.pid"
+
+for i in $(seq 50); do
+  [ -e "$TTY" ] && break
+  alive socat || { echo "ERROR: socat exited; see $DIR/socat.log"; stop; exit 1; }
+  sleep 0.2
+done
+[ -e "$TTY" ] || { echo "ERROR: no pty; see $DIR/socat.log"; stop; exit 1; }
+
+# Keep one slave fd open. When the last one closes (e4thcom quits), the pty master reports EIO,
+# socat exits and BlastEm is left without its client, which freezes the emulator on the next transmit.
+setsid sleep infinity <>"$TTY" >/dev/null 2>&1 &
+echo $! > "$DIR/hold.pid"
+
+echo "BlastEm running $ROM (pid $(cat "$DIR/blastem.pid")); serial pty $TTY"
+echo "Next: ./forth-connect"

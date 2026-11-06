@@ -1,0 +1,4 @@
+- Never commit or push unless the user explicitly asks.
+- Never edit generated files: `*.p`, `*.bin`, `*.lst`, `*.map`. Rebuild them with `asl` + `p2bin`.
+- Always comment hardware register values and magic numbers with their meaning (bit fields, addresses, units).
+- Strict 68000 only: no 68010/68020+ instructions or addressing modes.

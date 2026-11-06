@@ -1,0 +1,37 @@
+#!/bin/bash
+# Send one or more commands to the Forth target and print the output.
+# Usage: forth-cmd 'word1' ['word2' ...]
+#
+# Each argument is sent as a separate line. Output is captured after all commands settle.
+
+if [ -z "$1" ]; then
+  echo "Usage: $0 'word1' ['word2' ...]"
+  exit 1
+fi
+
+if ! tmux has-session -t forth 2>/dev/null; then
+  echo "ERROR: tmux session 'forth' not found."
+  exit 1
+fi
+
+for cmd in "$@"; do
+  echo "==> $cmd"
+  # A trailing ';' (every Forth definition) must be escaped, or tmux treats it as a command
+  # separator and send-keys fails with "unknown command: Enter". -l types the text literally.
+  [[ $cmd == *';' ]] && cmd="${cmd%;}\\;"
+  tmux send-keys -t forth -l -- "$cmd"
+  tmux send-keys -t forth Enter
+  sleep 0.3
+done
+
+prev=""
+for i in $(seq 1 60); do
+  cur=$(tmux capture-pane -t forth -p -S -60)
+  if [ "$cur" = "$prev" ]; then
+    break
+  fi
+  prev="$cur"
+  sleep 0.5
+done
+
+tmux capture-pane -t forth -p -S -60

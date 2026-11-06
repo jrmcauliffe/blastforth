@@ -1,0 +1,19 @@
+#!/bin/bash
+# Start or reattach to the e4thcom forth session
+# Usage: forth-connect [device [baud [plugin]]]
+#   Default: the BlastEm serial pty made by ./blastem-serial. e4thcom prepends /dev/ to the device,
+#   hence the relative path. Real hardware: forth-connect ttyUSB0
+SESSION=forth
+DEVICE=${1:-../tmp/blastforth-tty}
+BAUD=${2:-B4800}
+PLUGIN=${3:-anyforth}   # generic plugin: terminal + #include upload, no error checking
+E4THCOM=${E4THCOM:-$HOME/bin/e4thcom-0.8.5.2/e4thcom}
+
+if tmux has-session -t $SESSION 2>/dev/null; then
+  echo "Session '$SESSION' already running"
+else
+  cd "$(dirname "$(readlink -f "$0")")"   # e4thcom resolves #include relative to the cwd
+  tmux new-session -d -s $SESSION "$E4THCOM -t $PLUGIN -d $DEVICE -b $BAUD"
+  echo "Started session '$SESSION' on $DEVICE at $BAUD"
+fi
+tmux attach -t $SESSION

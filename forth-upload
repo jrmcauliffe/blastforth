@@ -1,0 +1,53 @@
+#!/bin/bash
+# Upload a .fs file to the Forth target via e4thcom in the 'forth' tmux session.
+# Usage: forth-upload <file.fs>
+#
+# Types '#include <file.fs>' into e4thcom, which streams the file to the target, then prints
+# what the terminal shows once it settles. The anyforth plugin does no error checking of its
+# own, so the only failure detected here is e4thcom itself failing (e.g. file not found).
+
+set -e
+
+FILE="$1"
+
+if [ -z "$FILE" ]; then
+  echo "Usage: $0 <file.fs>"
+  exit 1
+fi
+
+if ! tmux has-session -t forth 2>/dev/null; then
+  echo "ERROR: tmux session 'forth' not found. Start e4thcom first (./forth-connect)."
+  exit 1
+fi
+
+wait_settle() {
+  local prev=""
+  for i in $(seq 1 90); do
+    local cur
+    cur=$(tmux capture-pane -t forth -p -S -120)
+    if [ "$cur" = "$prev" ]; then
+      break
+    fi
+    prev="$cur"
+    sleep 0.5
+  done
+}
+
+echo "==> #include $FILE"
+tmux send-keys -t forth -l -- "#include $FILE"
+tmux send-keys -t forth Enter
+wait_settle
+
+# Only what followed our #include line, so an earlier failed upload is not reported again.
+OUTPUT=$(tmux capture-pane -t forth -p -S -120 |
+  awk -v pat="#include $FILE" 'index($0, pat) { n = NR } { l[NR] = $0 } END { for (i = (n ? n : 1); i <= NR; i++) print l[i] }')
+echo "$OUTPUT"
+
+if echo "$OUTPUT" | grep -q 'Msg from HOST'; then
+  echo ""
+  echo "ERROR: e4thcom reported a problem — check output above."
+  exit 1
+else
+  echo ""
+  echo "Upload complete."
+fi
