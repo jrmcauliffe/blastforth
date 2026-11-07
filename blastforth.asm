@@ -201,6 +201,56 @@ rx_tail					equ $00FF0101	; byte: next slot to read (only SerialGetc writes it)
 char_cr					equ $0D
 char_lf					equ $0A
 
+DS_START				equ $FFFC00
+;==============================================================
+; INNER INTERPRETER
+;==============================================================
+; 16-bit direct threading (see "Threading" in
+; docs/forth-design.md). A thread is a list of 16-bit cells,
+; each the address of a word's code field, which is machine
+; code: a primitive's body or a jsr DOCOL.
+;==============================================================
+
+; NEXT: run the word whose cell IP points at. Inlined at the end
+; of every primitive.
+; In: a5 = IP (next cell). Out: a0 = code field, a5 += 2. Uses a0.
+NEXT macro
+	movea.w (a5)+, a0	; Fetch cell at IP, sign-extend to code field address, IP += 2
+	jmp (a0)		; Set PC to code field
+	endm
+
+; DOCOL: enter a colon word. A colon word's code field is
+; jsr DOCOL; jsr pushes the address after itself, which is the
+; start of the word's thread.
+; In: (sp) = thread address, a5 = caller's IP.
+; Out: (sp) = caller's IP, a5 = thread. Uses a0.
+DOCOL:
+	movea.l (sp), a0	; Thread address pushed by jsr
+	move.l a5, (sp)		; Replace it with the caller's IP (saved for EXIT)
+	movea.l a0, a5		; IP = start of the thread
+	NEXT
+
+; EXIT: leave a colon word. Compiled as the last cell of every
+; colon word; undoes DOCOL.
+; In: (sp) = caller's IP. Out: a5 = caller's IP, sp += 4.
+EXIT:
+	move.l (sp)+, a5	; Pop the caller's IP
+	NEXT
+
+LIT:				; ( -- n )
+	move.w d7, -(a6)	; Push old TOS down
+	move.w (a5)+, d7	; New TOS and IP += 2
+	NEXT
+
+EMIT:				; ( c -- )
+	move.w d7, d0		; TOS to d0
+	move.w (a6)+, d7	; Refill TOS
+	jsr SerialPutc		; Call serial routine
+	NEXT
+
+HALT:				; Temp for testing
+-	bra.s -			; Loop
+
 ;==============================================================
 ; CODE ENTRY POINT
 ;==============================================================
@@ -234,12 +284,17 @@ CPU_EntryPoint:
 	;==============================================================
 	; Banner, then echo forever
 	;==============================================================
+
 	lea    Banner, a1
 -	move.b (a1)+, d0
 	beq.s  +
 	jsr    SerialPutc
 	bra.s  -
 +
+	; Temp boot code
+	movea.l #DS_START, a6		; Set SP address
+	lea BT, a5
+	NEXT
 
 	; e4thcom shows the typed line itself, so an echo written at the same place
 	; is indistinguishable from it. Start each echoed line with CR LF to put it
@@ -269,6 +324,13 @@ Banner:
 	dc.b "blastforth", char_cr, char_lf, 0
 	align  2				; Word-align the code after the odd-length string (asl has no EVEN)
 
+HI:
+	jsr DOCOL
+	dc.w LIT, 'H', EMIT
+	dc.w LIT, 'i', EMIT
+	dc.w EXIT
+BT:
+	dc.w HI, HI, HALT
 ;==============================================================
 ; SERIAL I/O
 ;==============================================================
