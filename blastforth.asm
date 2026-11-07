@@ -482,17 +482,95 @@ Banner:
 	move.w d1, (a6)
 	NEXT
 
+	DEFCODE "and", AND, 0		; ( a b -- a&b )
+	and.w (a6)+, d7
+	NEXT
+
+	DEFCODE "or", OR, 0		; ( a b -- a|b )
+	or.w (a6)+, d7
+	NEXT
+
+	DEFCODE "xor", XOR, 0		; ( a b -- a^b )
+	move.w (a6)+, d0		; Source for eor must be data reg.
+	eor.w d0, d7	
+	NEXT
+
+	DEFCODE "invert", INVERT, 0	; ( a -- ~a )
+	not.w d7
+	NEXT
+
+	DEFCODE "lshift", LSHIFT, 0	; ( x u -- x' )
+	move.w (a6)+, d0
+	lsl.w d7, d0
+	move.w d0, d7                            	
+	NEXT
+
+	DEFCODE "rshift", RSHIFT, 0	; ( x u -- x' )
+	move.w (a6)+, d0
+	lsr.w d7, d0
+	move.w d0, d7                            	
+	NEXT
+
+	DEFCODE "0=", ZEROEQUALS, 0	; ( n -- flag )
+	tst d7
+	seq d7	
+	ext.w d7
+	NEXT
+
+	DEFCODE "0<", ZEROLESS, 0	; ( n -- flag )
+	tst d7
+	smi d7	
+	ext.w d7
+	NEXT
+
+	DEFCODE "=", EQUALS, 0		; ( a b -- flag )
+	move.w (a6)+, d0	
+	cmp.w d7, d0	
+	seq d7
+	ext.w d7
+	NEXT
+
+	DEFCODE "<", LESS, 0		; ( a b -- flag )
+	move.w (a6)+, d0	
+	cmp.w d7, d0	
+	slt d7
+	ext.w d7
+	NEXT
+
+	DEFCODE ">", GREATER, 0		; ( a b -- flag )
+	move.w (a6)+, d0	
+	cmp.w d7, d0	
+	sgt d7
+	ext.w d7
+	NEXT
+
+	DEFCODE "u<", ULESS, 0		; ( a b -- flag )
+	move.w (a6)+, d0	
+	cmp.w d7, d0	
+	scs d7
+	ext.w d7
+	NEXT
+
 BT:
-	dc.w LIT, 3, LIT, 4, PLUS, PRINTHEX			; +: 0007
-	dc.w LIT, 10, LIT, 3, MINUS, PRINTHEX			; -: 0007
-	dc.w LIT, 41, ONEPLUS, PRINTHEX				; 1+: 002A
-	dc.w LIT, 5, NEGATE, PRINTHEX				; negate: FFFB
-	dc.w LIT, 21, TWOSTAR, PRINTHEX				; 2*: 002A
-	dc.w LIT, -4, TWOSLASH, PRINTHEX			; 2/: FFFE
-	dc.w LIT, 6, LIT, 7, STAR, PRINTHEX			; *: 002A
-	dc.w LIT, 17, LIT, 5, SLASHMOD, PRINTHEX, PRINTHEX	; /mod: 0003 0002
-	dc.w LIT, -7, LIT, 2, SLASHMOD, PRINTHEX, PRINTHEX	; /mod: FFFD FFFF (symmetric)
-	dc.w HALT
+   dc.w LIT, $0FF0, LIT, $00FF, AND, PRINTHEX      ; and: 00F0
+   dc.w LIT, $0F00, LIT, $00F0, OR, PRINTHEX      ; or: 0FF0
+   dc.w LIT, $FF00, LIT, $0FF0, XOR, PRINTHEX      ; xor: F0F0
+   dc.w LIT, 0, INVERT, PRINTHEX            ; invert: FFFF
+   dc.w LIT, 1, LIT, 4, LSHIFT, PRINTHEX         ; lshift: 0010
+   dc.w LIT, -1, LIT, 12, RSHIFT, PRINTHEX      ; rshift: 000F (zeros shifted in)
+   dc.w LIT, 5, LIT, 5, EQUALS, PRINTHEX         ; =: FFFF
+   dc.w LIT, -1, LIT, 1, LESS, PRINTHEX         ; <: FFFF (signed)
+   dc.w LIT, -1, LIT, 1, ULESS, PRINTHEX         ; u<: 0000 (FFFF is big)
+   dc.w LIT, 3, LIT, 2, GREATER, PRINTHEX         ; >: FFFF
+   dc.w LIT, 0, ZEROEQUALS, PRINTHEX         ; 0=: FFFF
+   dc.w LIT, -5, ZEROLESS, PRINTHEX         ; 0<: FFFF
+      dc.w LIT, 5, LIT, 6, EQUALS, PRINTHEX      ; =: 0000
+   dc.w LIT, 1, LIT, -1, LESS, PRINTHEX      ; <: 0000
+   dc.w LIT, 2, LIT, 3, GREATER, PRINTHEX      ; >: 0000
+   dc.w LIT, 1, LIT, -1, ULESS, PRINTHEX      ; u<: FFFF (1 < $FFFF unsigned)
+   dc.w LIT, $1200, ZEROEQUALS, PRINTHEX      ; 0=: 0000
+   dc.w LIT, 0, ZEROLESS, PRINTHEX         ; 0<: 0000
+   dc.w HALT
 
 ;==============================================================
 ; SERIAL I/O
