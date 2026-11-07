@@ -440,8 +440,58 @@ Banner:
 	move.w (sp), d7
 	NEXT
 
+	DEFCODE "1+", ONEPLUS, 0	; ( n -- n+1 )
+	addq.w #1, d7
+	NEXT
+
+	DEFCODE "1-", ONEMINUS, 0   ; ( n -- n-1 )
+	subq.w #1, d7
+	NEXT
+
+	DEFCODE "negate", NEGATE, 0	; ( n -- -n )
+	neg.w d7
+	NEXT
+
+	DEFCODE "2*", TWOSTAR, 0	; ( n -- n*2 )
+	add.w d7, d7
+	NEXT
+
+	DEFCODE "2/", TWOSLASH, 0	; ( n -- n/2 )
+	asr.w #1, d7
+	NEXT
+
+	DEFCODE "+", PLUS, 0		; ( a b -- a+b )
+	add.w (a6)+, d7
+	NEXT
+
+	DEFCODE "-", MINUS, 0		; ( a b -- a-b )
+	sub.w (a6)+, d7
+	neg.w d7
+	NEXT
+
+	DEFCODE "*", STAR, 0		; ( a b -- a*b )
+	muls.w (a6)+, d7
+	NEXT
+
+	DEFCODE "/mod", SLASHMOD, 0	; ( a b -- rem quot )
+	move.w (a6), d1
+	ext.l d1
+	divs d7, d1
+	move.w d1, d7
+	swap d1
+	move.w d1, (a6)
+	NEXT
+
 BT:
-	dc.w LIT, 5, TOR, LIT, 6, RFETCH, RFROM, PRINTHEX, PRINTHEX, PRINTHEX
+	dc.w LIT, 3, LIT, 4, PLUS, PRINTHEX			; +: 0007
+	dc.w LIT, 10, LIT, 3, MINUS, PRINTHEX			; -: 0007
+	dc.w LIT, 41, ONEPLUS, PRINTHEX				; 1+: 002A
+	dc.w LIT, 5, NEGATE, PRINTHEX				; negate: FFFB
+	dc.w LIT, 21, TWOSTAR, PRINTHEX				; 2*: 002A
+	dc.w LIT, -4, TWOSLASH, PRINTHEX			; 2/: FFFE
+	dc.w LIT, 6, LIT, 7, STAR, PRINTHEX			; *: 002A
+	dc.w LIT, 17, LIT, 5, SLASHMOD, PRINTHEX, PRINTHEX	; /mod: 0003 0002
+	dc.w LIT, -7, LIT, 2, SLASHMOD, PRINTHEX, PRINTHEX	; /mod: FFFD FFFF (symmetric)
 	dc.w HALT
 
 ;==============================================================
