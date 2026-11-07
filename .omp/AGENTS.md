@@ -1,7 +1,7 @@
 # blastforth
 
 A Forth system that runs on the Sega Mega Drive / Genesis, written in Motorola 68000 assembly.
-`hello.asm` is the current working baseline (Hello World ROM): vector table, ROM header, VDP init, palette, font tiles, main loop.
+`blastforth.asm` is the Forth kernel ROM, built up step by step per `docs/implementation-plan.md` (currently step 1: interrupt-driven serial echo on port 2). `hello.asm` is the original Hello World reference: vector table, ROM header, VDP init, palette, font tiles, main loop.
 
 ## Toolchain
 
@@ -15,9 +15,9 @@ A Forth system that runs on the Sega Mega Drive / Genesis, written in Motorola 6
 Two steps, by hand (no Makefile yet):
 
 ```sh
-asl hello.asm            # -> hello.p (assembler intermediate)
-p2bin hello.p hello.bin  # -> hello.bin (ROM image)
-/home/aigui/bin/blastem64/blastem hello.bin
+asl blastforth.asm                 # -> blastforth.p (assembler intermediate)
+p2bin blastforth.p blastforth.bin  # -> blastforth.bin (ROM image)
+./blastem-serial blastforth.bin    # BlastEm with port 2 as a serial port (see README)
 ```
 
 Generated, never edit: `*.p`, `*.bin`, `*.lst`, `*.map`. Only `*.bin` is gitignored right now.
@@ -33,11 +33,13 @@ Generated, never edit: `*.p`, `*.bin`, `*.lst`, `*.map`. Only `*.bin` is gitigno
 ## Hardware notes
 
 - ROM starts with the 64-entry CPU vector table, then the 256-byte header (`SEGA MEGA DRIVE ` at $100).
-- 68000 requires word-aligned code and word/long accesses on even addresses. Use `even` after odd-length `dc.b` data.
-- Work RAM is $FF0000-$FFFFFF (64 KiB). Initial SP is $FFE000 in `hello.asm`.
+- 68000 requires word-aligned code and word/long accesses on even addresses. Use `align 2` after odd-length `dc.b` data (asl has no `even`).
+- Work RAM is $FF0000-$FFFFFF (64 KiB). Initial SP (return stack top) is $FFFF00 in `blastforth.asm`; see the memory map in `docs/forth-design.md`.
 - VDP: control port $C00004, data port $C00000. TMSS signature must be written on hardware version != 0.
 - VDP layout in `hello.asm`: tiles at VRAM $0000, Plane A $C000, Plane B $E000; 64x32 plane, H40 (320x224).
 
 ## Forth design
 
-Not decided yet. Before adding Forth core code, ask the user to choose the threading model (subroutine / direct / indirect), register allocation (IP, data stack, return stack, working registers), dictionary layout, and how the interpreter gets input (controller, on-screen keyboard, serial, etc.). Do not pick these silently.
+Decided and recorded in `docs/forth-design.md`: 16-bit direct threading (16-bit cells reaching ROM $0000-$7FFF and RAM $FF8000-$FFFFFF), registers (`a5` IP, `a6` data stack, `d7` TOS, `a7` return stack), dictionary header layout, serial input. Follow that document and keep it up to date.
+
+Decided and recorded there: RAM memory map, header flag bits. Still open (listed at the end of that document): the primitive set. Ask the user before deciding it; do not pick it silently.

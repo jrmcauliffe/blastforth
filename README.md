@@ -1,6 +1,6 @@
 # blastforth
 
-A Forth system for the Sega Mega Drive / Genesis, in 68000 assembly. See `hello.asm` for the current baseline ROM.
+A Forth system for the Sega Mega Drive / Genesis, in 68000 assembly. `blastforth.asm` is the kernel ROM (`asl blastforth.asm && p2bin blastforth.p blastforth.bin`); `hello.asm` is the original Hello World reference. Design decisions are in `docs/forth-design.md`.
 
 ## Serial terminal
 
@@ -26,7 +26,7 @@ From the project root, in this order:
 ./forth-connect                                           # starts e4thcom in tmux session 'forth' and attaches
 ```
 
-`blastem-serial` takes any ROM (for example your own build of `hello.bin`). It must be running before `forth-connect`.
+`blastem-serial` takes any ROM (for example `blastforth.bin`). It must be running before `forth-connect`.
 
 ### Start a session (real hardware)
 
@@ -67,7 +67,7 @@ The agent does not start e4thcom itself. If the `forth` session is not running i
 
 - **Typing freezes the output.** While e4thcom's input line has text in it, e4thcom stops updating the display. Backspacing the line empty resumes it (tested); Enter sends the line to the target. This is e4thcom, not the ROM.
 - **Type in the tmux window, not the BlastEm window.** BlastEm's keys are emulator hotkeys (for example `u` enters its debugger, `l` loads a state) and do not go to the serial port.
-- **Nothing echoes except the ROM.** What you type appears only if the ROM sends it back.
+- **What you type is not the target's echo.** e4thcom shows your text in its own command-line buffer and sends it, with a trailing CR, only on Enter, without local echo. Before sending, it backspaces the cursor to the start of the typed text (`ui?` in `src/mfp1.5w4.0.2/sio-term-readline.mf`), so an echo from the target prints exactly over it and looks like nothing happened. `blastforth.asm` starts each echoed line with CR LF so the echo shows on its own line.
 - **If socat dies, BlastEm freezes** on its next transmit. Run `./blastem-serial stop` and start again. Quitting and restarting e4thcom is safe.
 - **Output sent while e4thcom is not attached queues up** and appears when it attaches again.
 - **Only controller port 2** carries the serial port in BlastEm, and only one port can at a time.
