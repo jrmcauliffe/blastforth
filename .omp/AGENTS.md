@@ -42,4 +42,4 @@ Generated, never edit: `*.p`, `*.bin`, `*.lst`, `*.map`. Only `*.bin` is gitigno
 
 Decided and recorded in `docs/forth-design.md`: 16-bit direct threading (16-bit cells reaching ROM $0000-$7FFF and RAM $FF8000-$FFFFFF), registers (`a5` IP, `a6` data stack, `d7` TOS, `a7` return stack), dictionary header layout, serial input. Follow that document and keep it up to date.
 
-Decided and recorded there: RAM memory map, header flag bits. Still open (listed at the end of that document): the primitive set. Ask the user before deciding it; do not pick it silently.
+Decided and recorded there: RAM memory map, header flag bits, lowercase names with exact-match `FIND`, the primitive set, shipped words as ROM colon definitions, symmetric division. Open questions go at the end of that document ("Still open"). Ask the user before deciding open items; do not pick them silently.

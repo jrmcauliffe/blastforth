@@ -75,6 +75,8 @@ Flags+len byte:
 | 5 | reserved |
 | 4-0 | name length, 1-31 characters |
 
+Names: Forth word names are lowercase (`emit`, `dup`). `FIND` compares names exactly, byte for byte: `EMIT` does not find `emit`. In the assembly source each word also has an uppercase asl label for its code field (`EMIT`, `DUP`), used when writing threads by hand. The label is never stored in ROM; it differs from the name where the name is not a valid asl symbol (`!` → `STORE`, `1+` → `ONEPLUS`). asl symbols are case-insensitive, so the uppercase is a readability convention only.
+
 ## Input
 
 Serial on controller port 2 at 4800 baud, driven from the e4thcom terminal (see the README). The setup follows [rhargreaves/mega-drive-serial-port](https://github.com/rhargreaves/mega-drive-serial-port) v0.3.0, known to work on hardware: S-Ctrl `$38`, then port 2 control `$7F`, then VDP register `$0B` = `$08` (external interrupt), then SR mask 1. Receive is interrupt-driven: S-Ctrl RINT raises IRQ 2, whose handler reads RxData and stores the byte in a ring buffer. `SerialGetc` sleeps in `stop #$2100` while the buffer is empty; it masks interrupts around the empty check so a byte arriving just before the `stop` still wakes it.
@@ -104,6 +106,22 @@ The Forth side (`$FF8000-$FFFFFF`) is reachable by 16-bit cells and by absolute 
 
 There is no overflow protection: a stack that overflows writes into its neighbour. A depth check in the interpreter loop (step 4) or guard gaps can be added later.
 
+## Primitives
+
+Common words are machine code, not only a minimal eForth-style core: most of them are a few 68000 instructions, and as colon definitions they would cost several `NEXT`s plus a `DOCOL`/`EXIT` each. Everything else the system ships with is a colon definition hand-threaded in ROM (`DEFWORD`), so the RAM dictionary (`$FF8000-$FFF8FF`) is left entirely for user definitions. Names are as typed (lowercase).
+
+| Group | Primitives |
+|---|---|
+| Inner interpreter | `exit` `lit` `branch` `0branch` `execute` |
+| Stack | `dup` `drop` `swap` `over` `rot` `nip` `?dup` `2dup` `2drop` `>r` `r>` `r@` |
+| Arithmetic | `+` `-` `1+` `1-` `2*` `2/` `negate` `*` `/mod` |
+| Logic | `and` `or` `xor` `invert` `lshift` `rshift` |
+| Comparison | `=` `<` `>` `u<` `0=` `0<` |
+| Memory | `@` `!` `c@` `c!` `+!` `cmove` `fill` |
+| I/O | `emit` `key` |
+
+Division is symmetric (truncates toward zero), as the 68000's `divs` does: `-7 2 /mod` gives remainder `-1`, quotient `-3`. Forth 2012 allows symmetric or floored; standard `fm/mod` (floored) and `sm/rem` (symmetric) can be added later for code that needs a specific one.
+
 ## Still open
 
-- Number of primitives in the kernel versus words defined in Forth.
+- `branch` / `0branch` target cell: absolute address (asl fills it from a label; ROM threads using it must sit in `$0000-$7FFF`) or offset relative to the cell. Needed when `branch` is written (step 3).

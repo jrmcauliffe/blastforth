@@ -4,22 +4,22 @@ The order to build blastforth in. jonesforth is the guide for what comes first, 
 
 ## Open decisions
 
-Decided before step 2 and recorded in `docs/forth-design.md`: the RAM memory map (Forth side) and the header flag bits.
+Decided and recorded in `docs/forth-design.md`: the RAM memory map (Forth side), the header flag bits, lowercase names with exact-match `FIND`, the primitive set (common words in machine code, see "Primitives"), shipped words as ROM colon definitions, and symmetric division.
 
 Still open, from `docs/forth-design.md`, "Still open":
 
-- How each word is written: machine-code primitive, or colon definition (a thread of cells). Both can live in the ROM kernel; Forth source uploaded at runtime compiles into RAM instead. Needed by step 3.
+- `branch` / `0branch` target: absolute address or relative offset. Needed by step 3.
 
 Record each decision in `docs/forth-design.md` when made.
 
 ## Steps
 
 1. **Serial echo in plain assembly.** Before any Forth, get a character in and back out over controller port 2. Every later step depends on seeing output. *Done:* `blastforth.asm` echoes over port 2 at 4800 baud with interrupt-driven receive, tested in BlastEm and on hardware.
-2. **Inner interpreter.** `NEXT`, `DOCOL`, `EXIT`, plus a header macro. Hand-write a thread in ROM that prints text with just `LIT` and `EMIT`, and have one colon word call another. This is the core of the system.
+2. **Inner interpreter.** `NEXT`, `DOCOL`, `EXIT`, plus a header macro. Hand-write a thread in ROM that prints text with just `LIT` and `EMIT`, and have one colon word call another. This is the core of the system. *Done:* `NEXT` macro, `DOCOL`, `EXIT`, `LIT`, `EMIT` and the `HEADER` macro in `blastforth.asm`; a boot thread runs colon word `hihi`, which calls `hi` twice, printing `HiHi` (tested in BlastEm). The `hi`/`hihi`/`halt` test words and boot thread are temporary.
 3. **Enough primitives to compute.** Stack, arithmetic, comparison, memory. Add an address-error handler early: odd-address `@` will happen, and without a handler the CPU just halts.
 4. **Outer interpreter, built up in order.** `KEY` / line input → `WORD` → `NUMBER` → `FIND` → `INTERPRET` / `QUIT`. Result: a calculator REPL over e4thcom.
 5. **Compiler.** `CREATE`, `,`, `[`, `]`, `:`, `;`, `IMMEDIATE`, `0BRANCH`. Once `: STAR 42 EMIT ;` works, most remaining work is in Forth.
-6. **Grow it in Forth.** Control structures, number printing, strings, `WORDS`, in a `.fs` file uploaded with `./forth-upload`. Move a word to assembly only when speed or hardware access needs it.
+6. **Grow the system.** Control structures, number printing, strings, `WORDS`. Words the system ships with go into ROM as `DEFWORD` threads, so the RAM dictionary stays free for user code (see "Primitives" in `docs/forth-design.md`). Move a word to machine code only when speed or hardware access needs it.
 7. **Mega Drive words.** Long-address access for VDP and I/O, a screen console, joypad, VBlank.
 
 Each step ends with something testable. Until the REPL exists (step 4), check state with the `blastem-debug` gdb workflow: `a5` (IP), `a6`/`d7` (data stack), PC.
@@ -27,7 +27,7 @@ Each step ends with something testable. Until the REPL exists (step 4), check st
 ## What to borrow from jonesforth
 
 - The order of steps 2–5: each stage gives a testable result before the next.
-- The split: a small assembly kernel, everything else in Forth.
+- The split: a small machine-code core, everything else as colon definitions. Unlike jonesforth, those live in ROM, not compiled from source at startup.
 - The idea of `IMMEDIATE` words, such as `IF` built from `HERE` and back-patching. Read it for the technique.
 
 ## Where jonesforth does not apply

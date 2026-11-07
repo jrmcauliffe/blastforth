@@ -219,6 +219,43 @@ NEXT macro
 	jmp (a0)		; Set PC to code field
 	endm
 
+; Dictionary header flag bits, in the flags+len byte (see
+; "Dictionary header" in docs/forth-design.md). Bits 4-0 = name length.
+f_immediate				equ $80		; Bit 7: runs even while compiling
+f_hidden				equ $40		; Bit 6: being defined, FIND skips it
+
+; Assembly-time only: address of the newest header so far. Each HEADER
+; links to it, then becomes it. 0 ends the chain (no header can be at $0000,
+; the vector table).
+link_prev				set 0
+
+; HEADER: dictionary header, ending at the word's code field.
+; name = Forth name string (lowercase), stored in ROM.
+; label = asl label for the code field (uppercase), used in threads.
+; flags = f_immediate / f_hidden, or 0.
+; Layout: link (dc.w), flags+len (dc.b), name, align 2, code field.
+HEADER macro name, label, flags, {GLOBALSYMBOLS}
+hdr_start	set *				; This header's address
+	dc.w   link_prev			; Link to the previous header
+link_prev	set hdr_start			; This header is now the newest
+	dc.b   (flags)|strlen(name), name	; Flags+len, then the name characters
+	align  2				; Code field must be even
+label:						; Code field
+	endm
+
+; DEFCODE: header for a machine code primitive. The code follows,
+; ending in NEXT. Same bytes as HEADER; the name marks the word's kind.
+DEFCODE macro name, label, flags, {GLOBALSYMBOLS}
+	HEADER name, label, flags
+	endm
+
+; DEFWORD: header plus code field (jsr DOCOL) for a colon definition.
+; The thread follows as dc.w cells, ending in EXIT.
+DEFWORD macro name, label, flags, {GLOBALSYMBOLS}
+	HEADER name, label, flags
+	jsr    DOCOL				; Code field: enter the thread that follows
+	endm
+
 ; DOCOL: enter a colon word. A colon word's code field is
 ; jsr DOCOL; jsr pushes the address after itself, which is the
 ; start of the word's thread.
@@ -233,22 +270,22 @@ DOCOL:
 ; EXIT: leave a colon word. Compiled as the last cell of every
 ; colon word; undoes DOCOL.
 ; In: (sp) = caller's IP. Out: a5 = caller's IP, sp += 4.
-EXIT:
+	DEFCODE "exit", EXIT, 0
 	move.l (sp)+, a5	; Pop the caller's IP
 	NEXT
 
-LIT:				; ( -- n )
+	DEFCODE "lit", LIT, 0		; ( -- n )
 	move.w d7, -(a6)	; Push old TOS down
 	move.w (a5)+, d7	; New TOS and IP += 2
 	NEXT
 
-EMIT:				; ( c -- )
+	DEFCODE "emit", EMIT, 0		; ( c -- )
 	move.w d7, d0		; TOS to d0
 	move.w (a6)+, d7	; Refill TOS
 	jsr SerialPutc		; Call serial routine
 	NEXT
 
-HALT:				; Temp for testing
+	DEFCODE "halt", HALT, 0		; Temp for testing
 -	bra.s -			; Loop
 
 ;==============================================================
@@ -324,13 +361,26 @@ Banner:
 	dc.b "blastforth", char_cr, char_lf, 0
 	align  2				; Word-align the code after the odd-length string (asl has no EVEN)
 
-HI:
-	jsr DOCOL
-	dc.w LIT, 'H', EMIT
-	dc.w LIT, 'i', EMIT
-	dc.w EXIT
+	DEFCODE ".hex", PRINTHEX, 0
+        move.w d7, d1		; TOS to scratch register
+	move.w (a6)+, d7	; POP TOS
+        move.w #3, d2		; Loop countdown
+-	rol.w #4, d1
+	move.w d1, d0		; Copy to extract bottom nibble
+	andi.w #$F, d0		; Mask bottom nibble
+	addi.b #'0', d0		; 0-9 -> '0'-'9', 10-15 -> ':'-'?'
+	cmpi.b #'9', d0
+	bls.s  +      		; '9' or below: a digit, done
+	addq.b #7, d0      	; skip ':'..'@' to land on 'A'-'F'
++	jsr SerialPutc		; Output char
+	dbra d2, -              ; Loop if more nibbles left
+	move.b #' ', d0		; Output final space
+	jsr SerialPutc		; For clarity
+	NEXT
+
 BT:
-	dc.w HI, HI, HALT
+	dc.w LIT, $1234, PRINTHEX, LIT, $BEEF, PRINTHEX, HALT
+
 ;==============================================================
 ; SERIAL I/O
 ;==============================================================
