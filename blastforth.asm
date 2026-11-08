@@ -518,9 +518,70 @@ PcMsg:
 	ext.w d7
 	NEXT
 
-BT:
-   dc.w LIT, 1, PRINTHEX, EMIT+1      ; 0001, then an odd jump
-   dc.w HALT
+	DEFCODE "@", FETCH, 0		; ( addr -- x )
+	movea.w d7, a0			; Sign-extend cell to address ($8000+ -> $FF8000+)
+	move.w (a0), d7			; Fetch
+	NEXT
+
+	DEFCODE "!", STORE, 0		; ( x addr -- )
+	movea.w d7, a0			; Sign-extend cell to address ($8000+ -> $FF8000+)
+	move.w (a6)+, (a0)		; Store
+	move.w (a6)+, d7		; Refill TOS
+	NEXT
+
+	DEFCODE "c@", CFETCH, 0		; ( addr -- c )
+	movea.w d7, a0			; Sign-extend cell to address ($8000+ -> $FF8000+)
+	clr.w d7			; Clear destination
+	move.b (a0), d7			; Fetch
+	NEXT
+
+	DEFCODE "c!", CSTORE, 0		; ( c addr -- )
+	movea.w d7, a0			; Sign-extend cell to address ($8000+ -> $FF8000+)
+	move.w (a6)+, d0		; Pop whole word
+	move.b d0, (a0)			; Store only lower byte
+	move.w (a6)+, d7		; Refill TOS
+	NEXT
+
+	DEFCODE "+!", PLUSSTORE, 0	; ( n addr -- )
+	movea.w d7, a0			; Sign-extend cell to address ($8000+ -> $FF8000+)
+	move.w (a6)+, d0		; Pop n
+	add.w d0, (a0)			; Add an to cell at addr
+	move.w (a6)+, d7		; Refill TOS
+	NEXT
+
+	DEFCODE "cmove", CMOVE, 0	; ( src dst u -- )
+	movea.w (a6)+, a0		; Pop dst address
+	movea.w (a6)+, a1		; Pop src address
+	tst.w d7			; Check if zero bytes specified
+	beq +				; If so leave
+	subq #1, d7			; Decrement remaining bytes
+-	move.b (a1)+, (a0)+		; Move current byte and inc	
+	dbra d7, -			; loop
++	move.w (a6)+, d7		; Refill TOS
+	NEXT
+
+	DEFCODE "fill", FILL, 0		; ( addr u c -- )
+	move.w (a6)+, d0		; Pop fill count 
+	movea.w (a6)+, a0		; Pop dst address
+	tst.w d0			; Check if zero bytes specified
+	beq +				; If so leave
+	subq #1, d0			; Decrement remaining bytes
+-	move.b d7, (a0)+		; Move byte and inc	
+	dbra d0, -			; loop
++	move.w (a6)+, d7		; Refill TOS
+	NEXT
+
+BT:						; Temporary test thread
+   dc.w LIT, $1234, LIT, $8010, STORE      ; Known bytes: 12 34
+   dc.w LIT, $5678, LIT, $8012, STORE      ; Known bytes: 56 78
+   dc.w LIT, $8011, LIT, 2, LIT, $41, FILL      ; 'A' -> $8011, $8012
+   dc.w LIT, $8010, FETCH, PRINTHEX      ; Prints 1241
+   dc.w LIT, $8012, FETCH, PRINTHEX      ; Prints 4178 ($8013 untouched)
+   dc.w LIT, $8010, LIT, 0, LIT, $FF, FILL      ; Zero count: writes nothing
+   dc.w LIT, $8010, FETCH, PRINTHEX      ; Still 1241
+	dc.w LIT, char_cr, EMIT, LIT, char_lf, EMIT	; New line before the next test
+	dc.w EMIT+1				; Odd code field: address error handler reports it
+	dc.w HALT				; Not reached: the handler jumps to HALT
 
 ;==============================================================
 ; SERIAL I/O
