@@ -284,8 +284,37 @@ DOCOL:
 	jsr SerialPutc		; Call serial routine
 	NEXT
 
+	DEFCODE "key", KEY, 0		; ( -- c )
+	jsr SerialGetc			; Wait for byte in d0.w
+	move.w d7, -(a6)		; Push old TOS down
+	move.w d0, d7			; New TOS, c
+	NEXT
+
+	DEFCODE "execute", EXECUTE, 0	; ( xt -- )
+	movea.w d7, a0		; sign-extend cell to address ($8000+ -> $FF8000+)
+	move.w (a6)+, d7	; Refill TOS
+	jmp (a0)		; jmp to code field
+				; No Next required as target word will have one	
+
 	DEFCODE "halt", HALT, 0		; Temp for testing
 -	bra.s -			; Loop
+
+	DEFWORD "two", TWO, 0      ; Temp: tests execute on a colon word
+	dc.w LIT, 2, EXIT      ; ( -- 2 )
+
+	DEFCODE "branch", BRANCH, 0	; ( -- )
+	movea.w (a5), a5		; Set the next cell as the new instruction pointer
+	NEXT
+
+	DEFCODE "0branch", ZBRANCH, 0	; ( flag -- )
+	tst.w d7		; flag == 0?
+	beq.s +			; If yes, take branch
+	move.w (a6)+, d7	; Refill TOS
+	addq.l #2, a5		; If no, skip target cell
+	NEXT
++	move.w (a6)+, d7	; Refill TOS
+ 	movea.w (a5), a5	; Update IP with target address
+	NEXT
 
 ;==============================================================
 ; CODE ENTRY POINT
@@ -572,13 +601,17 @@ PcMsg:
 	NEXT
 
 BT:						; Temporary test thread
-   dc.w LIT, $1234, LIT, $8010, STORE      ; Known bytes: 12 34
-   dc.w LIT, $5678, LIT, $8012, STORE      ; Known bytes: 56 78
-   dc.w LIT, $8011, LIT, 2, LIT, $41, FILL      ; 'A' -> $8011, $8012
-   dc.w LIT, $8010, FETCH, PRINTHEX      ; Prints 1241
-   dc.w LIT, $8012, FETCH, PRINTHEX      ; Prints 4178 ($8013 untouched)
-   dc.w LIT, $8010, LIT, 0, LIT, $FF, FILL      ; Zero count: writes nothing
-   dc.w LIT, $8010, FETCH, PRINTHEX      ; Still 1241
+	dc.w LIT, 7, LIT, DUP, EXECUTE, PLUS, PRINTHEX   ; Primitive xt: prints 000E
+	dc.w LIT, $41, LIT, EMIT, EXECUTE      ; Primitive xt: prints A
+	dc.w LIT, TWO, EXECUTE, PRINTHEX      ; Colon xt: prints 0002
+	dc.w LIT, 0, ZBRANCH, +         ; Flag 0: jumps
+	dc.w LIT, $58, EMIT         ; Skipped: would print X
++	dc.w LIT, 1, ZBRANCH, +         ; Flag 1: falls through
+	dc.w LIT, $59, EMIT         ; Prints Y
++	dc.w BRANCH, +            ; Always jumps
+	dc.w LIT, $5A, EMIT         ; Skipped: would print Z
++	dc.w LIT, $4B, EMIT         ; Prints K
+	dc.w KEY, PRINTHEX            ; Waits; type a key in e4thcom
 	dc.w LIT, char_cr, EMIT, LIT, char_lf, EMIT	; New line before the next test
 	dc.w EMIT+1				; Odd code field: address error handler reports it
 	dc.w HALT				; Not reached: the handler jumps to HALT

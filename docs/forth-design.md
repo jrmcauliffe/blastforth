@@ -124,6 +124,8 @@ Common words are machine code, not only a minimal eForth-style core: most of the
 
 Division is symmetric (truncates toward zero), as the 68000's `divs` does: `-7 2 /mod` gives remainder `-1`, quotient `-3`. Forth 2012 allows symmetric or floored; standard `fm/mod` (floored) and `sm/rem` (symmetric) can be added later for code that needs a specific one.
 
+`branch` and `0branch` take their target from the next cell as an absolute address, sign-extended like any other cell: `movea.w (a5),a5` (12 cycles) when the branch is taken. A not-taken `0branch` steps over the cell with `addq.l #2,a5`. In ROM, asl fills the cell from a label (`dc.w BRANCH, loop`); the compiler stores `HERE` values. A thread that branches must lie in `$0000-$7FFF` or `$FF8000-$FFFFFF`, as code fields already must. A relative offset (`adda.w (a5),a5`) would cost the same and make threads movable, but blastforth never moves compiled code.
+
 ## Still open
 
-- `branch` / `0branch` target cell: absolute address (asl fills it from a label; ROM threads using it must sit in `$0000-$7FFF`) or offset relative to the cell. Needed when `branch` is written (step 3).
+Nothing at the moment.

@@ -4,11 +4,9 @@ The order to build blastforth in. jonesforth is the guide for what comes first, 
 
 ## Open decisions
 
-Decided and recorded in `docs/forth-design.md`: the RAM memory map (Forth side), the header flag bits, lowercase names with exact-match `FIND`, the primitive set (common words in machine code, see "Primitives"), shipped words as ROM colon definitions, and symmetric division.
+Decided and recorded in `docs/forth-design.md`: the RAM memory map (Forth side), the header flag bits, lowercase names with exact-match `FIND`, the primitive set (common words in machine code, see "Primitives"), shipped words as ROM colon definitions, symmetric division, and absolute `branch` / `0branch` targets.
 
-Still open, from `docs/forth-design.md`, "Still open":
-
-- `branch` / `0branch` target: absolute address or relative offset. Needed by step 3.
+Nothing is open right now; new questions go in `docs/forth-design.md`, "Still open".
 
 Record each decision in `docs/forth-design.md` when made.
 
@@ -16,7 +14,7 @@ Record each decision in `docs/forth-design.md` when made.
 
 1. **Serial echo in plain assembly.** Before any Forth, get a character in and back out over controller port 2. Every later step depends on seeing output. *Done:* `blastforth.asm` echoes over port 2 at 4800 baud with interrupt-driven receive, tested in BlastEm and on hardware.
 2. **Inner interpreter.** `NEXT`, `DOCOL`, `EXIT`, plus a header macro. Hand-write a thread in ROM that prints text with just `LIT` and `EMIT`, and have one colon word call another. This is the core of the system. *Done:* `NEXT` macro, `DOCOL`, `EXIT`, `LIT`, `EMIT` and the `HEADER` macro in `blastforth.asm`; a boot thread runs colon word `hihi`, which calls `hi` twice, printing `HiHi` (tested in BlastEm). The `hi`/`hihi`/`halt` test words and boot thread are temporary.
-3. **Enough primitives to compute.** Stack, arithmetic, comparison, memory. Add an address-error handler early: odd-address `@` will happen, and without a handler the CPU just halts.
+3. **Enough primitives to compute.** Stack, arithmetic, comparison, memory. Add an address-error handler early: odd-address `@` will happen, and without a handler the CPU just halts. *Done:* every primitive in the table in `docs/forth-design.md` ("Primitives") is in `blastforth.asm`. `CPU_AddressError` prints the fault address and PC over serial, then halts. The memory words, `key`, `execute`, `branch` and `0branch` were tested in BlastEm through the boot thread. The `two` and `halt` words and the boot thread are temporary.
 4. **Outer interpreter, built up in order.** `KEY` / line input → `WORD` → `NUMBER` → `FIND` → `INTERPRET` / `QUIT`. Result: a calculator REPL over e4thcom.
 5. **Compiler.** `CREATE`, `,`, `[`, `]`, `:`, `;`, `IMMEDIATE`, `0BRANCH`. Once `: STAR 42 EMIT ;` works, most remaining work is in Forth.
 6. **Grow the system.** Control structures, number printing, strings, `WORDS`. Words the system ships with go into ROM as `DEFWORD` threads, so the RAM dictionary stays free for user code (see "Primitives" in `docs/forth-design.md`). Move a word to machine code only when speed or hardware access needs it.
