@@ -198,8 +198,22 @@ char_cr					equ $0D
 char_lf					equ $0A
 
 ; Forth stacks (see "Memory map" in docs/forth-design.md). Both grow down.
-DS_START            equ $FFFC00   ; Data stack top: a6 starts here
-RS_START            equ $FFFF00   ; Return stack top: sp starts here (vector 0)
+DS_START		equ $00FFFC00   ; Data stack top: a6 starts here
+RS_START		equ $00FFFF00   ; Return stack top: sp starts here (vector 0)
+
+; Forth system variables (see "Outer interpreter" in docs/forth-design.md).
+; One cell each. Written sign-extended ($FFFFxxxx) so asl uses absolute
+; short addressing: 2 bytes and 4 cycles less than absolute long.
+var_here		equ $FFFFFF00    ; Next free dictionary byte
+var_latest		equ $FFFFFF02    ; Header of the newest word
+var_state		equ $FFFFFF04    ; 0 = interpreting, else compiling
+var_base		equ $FFFFFF06    ; Number base for number and .
+var_toin		equ $FFFFFF08    ; >in: parse offset into the TIB
+var_ntib		equ $FFFFFF0A    ; #tib: characters in the TIB
+
+TIB_START		equ $FFFFF900    ; Terminal input buffer, 128 bytes
+WORD_BUF		equ $FFFFF980    ; Word Buffer
+DICT_START		equ $FFFF8000    ; User dictionary, grows up
 
 ;==============================================================
 ; INNER INTERPRETER
@@ -255,6 +269,12 @@ DEFWORD macro name, label, flags, {GLOBALSYMBOLS}
 	jsr    DOCOL				; Code field: enter the thread that follows
 	endm
 
+DEFCONST macro name, label, value, {GLOBALSYMBOLS}
+	HEADER name, label, 0
+	jsr DOCON		; Code field, push value of cell that follows
+	dc.w (value)&$FFFF	; Const value, low 16 bits
+	endm
+
 ; DOCOL: enter a colon word. A colon word's code field is
 ; jsr DOCOL; jsr pushes the address after itself, which is the
 ; start of the word's thread.
@@ -265,6 +285,20 @@ DOCOL:
 	move.l a5, (sp)		; Replace it with the caller's IP (saved for EXIT)
 	movea.l a0, a5		; IP = start of the thread
 	NEXT
+
+DOCON:
+	movea.l (sp)+, a0	; Address of value cell
+	move.w d7, -(a6)	; Push down stack
+	move.w (a0), d7		; New TOS
+	NEXT
+
+	DEFCONST "here", HERE, var_here		; ( -- addr ) next free dictionary byte
+	DEFCONST "latest", LATEST, var_latest	; ( -- addr ) newest header
+	DEFCONST "state", STATE, var_state	; ( -- addr ) 0 = interpreting
+	DEFCONST "base", BASE, var_base		; ( -- addr ) number base
+	DEFCONST ">in", TOIN, var_toin		; ( -- addr ) parse offset into the TIB
+	DEFCONST "#tib", NTIB, var_ntib		; ( -- addr ) characters in the TIB
+	DEFCONST "tib", TIB, TIB_START		; ( -- addr ) the TIB itself
 
 ; EXIT: leave a colon word. Compiled as the last cell of every
 ; colon word; undoes DOCOL.
@@ -354,7 +388,14 @@ CPU_EntryPoint:
 	jsr  SerialPutString
 
 	; Temp boot code
-	movea.l #DS_START, a6		; Set SP address
+	movea.l #DS_START, a6			; Set SP address
+	; Forth system variables (see "Outer interpreter" in docs/forth-design.md)
+	move.w #DICT_START&$FFFF, var_here	; Empty RAM dictionary: next free byte is $FF8000
+	move.w #rom_latest, var_latest		; Search starts at the newest ROM header
+	clr.w  var_state			; 0 = interpreting
+	move.w #10, var_base			; Decimal
+	clr.w  var_toin				; Parse from the start of the TIB
+	clr.w  var_ntib				; TIB empty
 	lea BT, a5
 	NEXT
 
@@ -600,20 +641,91 @@ PcMsg:
 +	move.w (a6)+, d7		; Refill TOS
 	NEXT
 
+	DEFCODE "count", COUNT, 0	; ( c-addr -- c-addr+1 u )
+	movea.w d7, a0			; Save c-addr
+	addq.w #1, d7			; Next address
+	move.w d7, -(a6)		; Push under TOS
+	moveq #0, d7			; Clear upper bits
+	move.b (a0), d7			; u to TOS
+	NEXT
+
+	DEFCODE "type", TYPE, 0		; ( c-addr u -- )
+	movea.w (a6)+, a0		; Pop c-addr
+	tst.w d7			; Check if zero bytes specified
+	beq +				; If so leave
+	subq #1, d7			; Decrement remaining bytes
+-	move.b (a0)+, d0		; Move current byte and inc
+	jsr SerialPutc			; Print char
+	dbra d7, -			; loop
++	move.w (a6)+, d7		; Refill TOS
+	NEXT
+
+	DEFCODE "accept", ACCEPT, 0	; ( c-addr +n -- +n2 )
+	movea.w (a6)+, a1		; Pop c-addr
+	moveq #0, d2			; Count starts at zero
+-	jsr SerialGetc			; Next byte in d0.w
+	cmp.b #char_cr, d0		; CR?
+	beq.s +				; Then done
+	cmp.b #char_lf, d0		; LF?
+	beq.s -				; Then skip to next
+	cmp.w d7, d2			; Count >= limit?
+	bhs.s -				; Full, but keep reading until CR
+	move.b d0, (a1)+		; Store received char and inc
+	addq.w #1, d2			; Inc count
+	bra.s -				; Next char
++	move.w d2, d7			; Number stored to TOS
+	NEXT
+
+	DEFCODE "word", WORD, 0		; ( char -- c-addr )
+	lea TIB_START, a0		; a0 = TIB start
+	move.w var_toin, d1		; d1 = >in
+	adda.w d1, a0			; a0 = read pointer, TIB + >in
+	move.w var_ntib, d2		; d2 = characters left to read,
+	sub.w  d1, d2			; #tib - >in
+	lea WORD_BUF+1, a1		; a1 = write pointer, after the length byte
+	; Skip leading delimiters
+-	subq.w #1, d2			; Any characters left?
+	bmi.s +				; No: end of line, empty word
+	move.b (a0)+, d0		; Next character
+	bsr.s WordIsDelim		; Z = 1 if it is a delimiter
+	beq.s -				; Delimiter: keep skipping
+	; Copy the word: d0 holds its first character
+-	move.b d0, (a1)+		; Store the character
+	subq.w #1, d2			; Any characters left?
+	bmi.s +				; No: the word ends at the end of the line
+	move.b (a0)+, d0		; Next character (a delimiter is consumed too)
+	bsr.s WordIsDelim		; Z = 1 if it is a delimiter
+	bne.s -				; Not a delimiter: copy it
+	; Done: store the length, update >in, return WORD_BUF
++	move.w a1, d0			; Low word of the write pointer
+	sub.w  #(WORD_BUF+1)&$FFFF, d0	; Length = write pointer - first character
+	move.b d0, WORD_BUF		; Length byte
+	move.w a0, d1			; Low word of the read pointer
+	sub.w  #TIB_START&$FFFF, d1	; >in = read pointer - TIB
+	move.w d1, var_toin
+	move.w #WORD_BUF&$FFFF, d7	; TOS = c-addr of the counted string
+	NEXT
+
+; WordIsDelim: is d0 a delimiter for word?
+; In: d0.b = character, d7.b = delimiter. Out: Z = 1 if delimiter.
+; A space delimiter also matches every control character ($00-$1F),
+; so tabs separate words.
+WordIsDelim:
+	cmp.b d7, d0			; Exactly the delimiter?
+	beq.s +				; Yes: Z = 1
+	cmp.b #$20, d7			; Delimiter is a space?
+	bne.s +				; No: Z = 0 from this compare
+	cmp.b #$20, d0			; Control character?
+	bhi.s +				; No (above $20): Z = 0
+	cmp.b d0, d0			; Yes: set Z = 1
++	rts
+
 BT:						; Temporary test thread
-	dc.w LIT, 7, LIT, DUP, EXECUTE, PLUS, PRINTHEX   ; Primitive xt: prints 000E
-	dc.w LIT, $41, LIT, EMIT, EXECUTE      ; Primitive xt: prints A
-	dc.w LIT, TWO, EXECUTE, PRINTHEX      ; Colon xt: prints 0002
-	dc.w LIT, 0, ZBRANCH, +         ; Flag 0: jumps
-	dc.w LIT, $58, EMIT         ; Skipped: would print X
-+	dc.w LIT, 1, ZBRANCH, +         ; Flag 1: falls through
-	dc.w LIT, $59, EMIT         ; Prints Y
-+	dc.w BRANCH, +            ; Always jumps
-	dc.w LIT, $5A, EMIT         ; Skipped: would print Z
-+	dc.w LIT, $4B, EMIT         ; Prints K
-	dc.w KEY, PRINTHEX            ; Waits; type a key in e4thcom
-	dc.w LIT, char_cr, EMIT, LIT, char_lf, EMIT	; New line before the next test
-	dc.w EMIT+1				; Odd code field: address error handler reports it
+	dc.w TIB, LIT, 128, ACCEPT, NTIB, STORE   ; Line into TIB, #tib = length
+	dc.w LIT, 0, TOIN, STORE      ; Parse from the start
+	dc.w LIT, $20, WORD, COUNT, LIT, $5B, EMIT, TYPE, LIT, $5D, EMIT   ; [word]
+	dc.w LIT, $20, WORD, COUNT, LIT, $5B, EMIT, TYPE, LIT, $5D, EMIT   ; [word]
+	dc.w LIT, $20, WORD, COUNT, LIT, $5B, EMIT, TYPE, LIT, $5D, EMIT   ; [] at end of line
 	dc.w HALT				; Not reached: the handler jumps to HALT
 
 ;==============================================================
@@ -761,6 +873,9 @@ VDP_LoadRegisters:
 	addi.w #$0100, d1			; Next register number
 	dbra   d0, -
 	rts
+
+; Last rom dictionary pointer
+rom_latest equ link_prev
 
 ; A label defining the end of ROM so we can compute the total size.
 ROM_End:

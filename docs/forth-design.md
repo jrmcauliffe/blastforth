@@ -120,11 +120,49 @@ Common words are machine code, not only a minimal eForth-style core: most of the
 | Logic | `and` `or` `xor` `invert` `lshift` `rshift` |
 | Comparison | `=` `<` `>` `u<` `0=` `0<` |
 | Memory | `@` `!` `c@` `c!` `+!` `cmove` `fill` |
-| I/O | `emit` `key` |
+| I/O | `emit` `key` `type` `.` |
+| Outer interpreter | `accept` `word` `find` `number` `count` `depth` `abort` |
 
 Division is symmetric (truncates toward zero), as the 68000's `divs` does: `-7 2 /mod` gives remainder `-1`, quotient `-3`. Forth 2012 allows symmetric or floored; standard `fm/mod` (floored) and `sm/rem` (symmetric) can be added later for code that needs a specific one.
 
 `branch` and `0branch` take their target from the next cell as an absolute address, sign-extended like any other cell: `movea.w (a5),a5` (12 cycles) when the branch is taken. A not-taken `0branch` steps over the cell with `addq.l #2,a5`. In ROM, asl fills the cell from a label (`dc.w BRANCH, loop`); the compiler stores `HERE` values. A thread that branches must lie in `$0000-$7FFF` or `$FF8000-$FFFFFF`, as code fields already must. A relative offset (`adda.w (a5),a5`) would cost the same and make threads movable, but blastforth never moves compiled code.
+
+## Outer interpreter
+
+The scanners (`accept`, `word`, `find`, `number`) are machine code: they are byte loops, and `find` runs for every word of every line during `#include`, inside e4thcom's ~100 ms silence window. `interpret` and `quit` are control logic and are ROM colon definitions (`DEFWORD`), hand-threaded with `BRANCH`/`ZBRANCH` labels.
+
+Interfaces (classic, as in jonesforth and most texts):
+
+| Word | Stack | Behaviour |
+|---|---|---|
+| `accept` | `( c-addr +n -- +n )` | Read bytes with `SerialGetc` into the buffer until CR; store at most `+n`, drop the rest of the line. LF is ignored. No echo and no backspace handling: e4thcom edits and displays the line itself. |
+| `word` | `( char -- c-addr )` | Skip leading `char`, copy up to the next `char` or the end of the TIB into the `WORD` buffer as a counted string (length byte, then characters), advance `>in`. With `char` = space (`bl`), every byte `<= $20` counts as a delimiter, so tabs separate words. Returns length 0 at the end of the line. |
+| `find` | `( c-addr -- c-addr 0 \| xt 1 \| xt -1 )` | Walk the chain from `latest`, skip hidden headers, compare length and name bytes exactly. `xt` is the code field address. `1` = immediate, `-1` = normal. |
+| `number` | `( c-addr -- n -1 \| c-addr 0 )` | Convert a counted string. Optional prefix `$` (hex), `#` (decimal) or `%` (binary) overrides `base` for this number only; then optional `-`; then at least one digit. Digits `0-9`, `a-z`/`A-Z` = 10-35, each must be below the base. 16-bit result, overflow wraps. |
+| `.` | `( n -- )` | Print signed in `base`, then a space. |
+| `count` | `( c-addr -- c-addr+1 u )` | Counted string to address and length. |
+| `type` | `( c-addr u -- )` | Send `u` bytes with `SerialPutc`. |
+| `depth` | `( -- n )` | Number of cells on the data stack before `depth` ran. |
+| `abort` | `( i*x -- )` | Empty both stacks, set `state` to 0, continue in `quit`. |
+
+`quit` empties the return stack, then loops: `accept` a line into the TIB, set `#tib` and `>in`, `interpret`, check the stack, print ` ok` and CR LF. An unknown word prints the word and ` ?`, then `abort`s. After each line, a negative `depth` prints ` stack?` and `abort`s. ` ok` is also what a future e4thcom plugin can wait for as flow control (see "Input").
+
+### Constants and variables
+
+A constant's code field is `jsr DOCON`, followed by one `dc.w` cell holding its value, the same shape as a colon word. `DOCON` pops the address `jsr` pushed and pushes the cell stored there. A variable is a constant whose value is its RAM address, so system variables in ROM need no RAM header. Step 5's `constant` and `variable` reuse `DOCON`.
+
+System variables (cells, top of RAM, see "Memory map"):
+
+| Address | Variable | Boot value |
+|---|---|---|
+| `$FFFF00` | `here` | `$8000` (dictionary start, `$FF8000`) |
+| `$FFFF02` | `latest` | header of the last ROM word |
+| `$FFFF04` | `state` | 0 (interpreting) |
+| `$FFFF06` | `base` | 10 |
+| `$FFFF08` | `>in` | 0 |
+| `$FFFF0A` | `#tib` | 0 |
+
+`tib` is a constant: `$F900` (`$FFF900`).
 
 ## Still open
 
