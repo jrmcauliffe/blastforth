@@ -1,11 +1,7 @@
 ;==============================================================
 ; BLASTFORTH - SEGA MEGA DRIVE/GENESIS FORTH
 ;==============================================================
-; Step 1 of docs/implementation-plan.md: serial echo in plain
-; assembly. Controller port 2 runs as a UART at 4800 baud.
-; Received bytes arrive through the external interrupt (IRQ 2)
-; into a ring buffer; the main loop sleeps until a byte is
-; there and sends it back.
+; Forth Kernel
 ;
 ; Build:
 ;    asl blastforth.asm
@@ -23,10 +19,10 @@ ROM_Start:
 ; Read by the CPU from $0000 on reset. IRQ level 2 is the
 ; external interrupt, raised by the serial port on receive.
 ;==============================================================
-	dc.l   $00FFFF00			; Initial stack pointer: top of the return stack ($FFFC00-$FFFEFF, docs/forth-design.md)
+	dc.l   RS_START			; Initial stack pointer: top of the return stack ($FFFC00-$FFFEFF, docs/forth-design.md)
 	dc.l   CPU_EntryPoint		; Start of program
-	dc.l   CPU_Exception		; Bus error
-	dc.l   CPU_Exception		; Address error
+	dc.l   CPU_AddressError		; Bus error
+	dc.l   CPU_AddressError		; Address error
 	dc.l   CPU_Exception		; Illegal instruction
 	dc.l   CPU_Exception		; Division by zero
 	dc.l   CPU_Exception		; CHK CPU_Exception
@@ -201,7 +197,10 @@ rx_tail					equ $00FF0101	; byte: next slot to read (only SerialGetc writes it)
 char_cr					equ $0D
 char_lf					equ $0A
 
-DS_START				equ $FFFC00
+; Forth stacks (see "Memory map" in docs/forth-design.md). Both grow down.
+DS_START            equ $FFFC00   ; Data stack top: a6 starts here
+RS_START            equ $FFFF00   ; Return stack top: sp starts here (vector 0)
+
 ;==============================================================
 ; INNER INTERPRETER
 ;==============================================================
@@ -319,62 +318,30 @@ CPU_EntryPoint:
 	move.w #sr_irq_on, sr
 
 	;==============================================================
-	; Banner, then echo forever
+	; Banner, then run boot thread
 	;==============================================================
 
 	lea    Banner, a1
--	move.b (a1)+, d0
-	beq.s  +
-	jsr    SerialPutc
-	bra.s  -
-+
+	jsr  SerialPutString
+
 	; Temp boot code
 	movea.l #DS_START, a6		; Set SP address
 	lea BT, a5
 	NEXT
 
-	; e4thcom shows the typed line itself, so an echo written at the same place
-	; is indistinguishable from it. Start each echoed line with CR LF to put it
-	; on its own line. e4thcom ends each line with CR only (manual, "Buffered
-	; Command Line"); add LF after it too.
-	; d3.b = 1 while at the start of an echoed line, 0 inside one.
-	moveq  #1, d3
--	jsr    SerialGetc			; Waits until a byte arrives
-	tst.b  d3
-	beq.s  +				; Inside a line: echo directly
-	move.b d0, d2				; Keep the byte across the CR LF
-	moveq  #char_cr, d0
-	jsr    SerialPutc
-	moveq  #char_lf, d0
-	jsr    SerialPutc
-	move.b d2, d0
-	clr.b  d3				; Now inside the echoed line
-+	jsr    SerialPutc			; Echo it (SerialPutc leaves d0 unchanged)
-	cmpi.b #char_cr, d0
-	bne.s  -
-	moveq  #char_lf, d0
-	jsr    SerialPutc
-	moveq  #1, d3				; Next byte starts a new echoed line
-	bra.s  -
-
 Banner:
 	dc.b "blastforth", char_cr, char_lf, 0
+AddrErrMsg:
+	dc.b "addr error ", 0
+PcMsg:
+	dc.b " pc ", 0
 	align  2				; Word-align the code after the odd-length string (asl has no EVEN)
 
 	DEFCODE ".hex", PRINTHEX, 0
         move.w d7, d1		; TOS to scratch register
 	move.w (a6)+, d7	; POP TOS
-        move.w #3, d2		; Loop countdown
--	rol.w #4, d1
-	move.w d1, d0		; Copy to extract bottom nibble
-	andi.w #$F, d0		; Mask bottom nibble
-	addi.b #'0', d0		; 0-9 -> '0'-'9', 10-15 -> ':'-'?'
-	cmpi.b #'9', d0
-	bls.s  +      		; '9' or below: a digit, done
-	addq.b #7, d0      	; skip ':'..'@' to land on 'A'-'F'
-+	jsr SerialPutc		; Output char
-	dbra d2, -              ; Loop if more nibbles left
-	move.b #' ', d0		; Output final space
+	jsr SerialPutHex	; Expects val in d1
+	moveq #' ', d0		; Output final space
 	jsr SerialPutc		; For clarity
 	NEXT
 
@@ -552,24 +519,7 @@ Banner:
 	NEXT
 
 BT:
-   dc.w LIT, $0FF0, LIT, $00FF, AND, PRINTHEX      ; and: 00F0
-   dc.w LIT, $0F00, LIT, $00F0, OR, PRINTHEX      ; or: 0FF0
-   dc.w LIT, $FF00, LIT, $0FF0, XOR, PRINTHEX      ; xor: F0F0
-   dc.w LIT, 0, INVERT, PRINTHEX            ; invert: FFFF
-   dc.w LIT, 1, LIT, 4, LSHIFT, PRINTHEX         ; lshift: 0010
-   dc.w LIT, -1, LIT, 12, RSHIFT, PRINTHEX      ; rshift: 000F (zeros shifted in)
-   dc.w LIT, 5, LIT, 5, EQUALS, PRINTHEX         ; =: FFFF
-   dc.w LIT, -1, LIT, 1, LESS, PRINTHEX         ; <: FFFF (signed)
-   dc.w LIT, -1, LIT, 1, ULESS, PRINTHEX         ; u<: 0000 (FFFF is big)
-   dc.w LIT, 3, LIT, 2, GREATER, PRINTHEX         ; >: FFFF
-   dc.w LIT, 0, ZEROEQUALS, PRINTHEX         ; 0=: FFFF
-   dc.w LIT, -5, ZEROLESS, PRINTHEX         ; 0<: FFFF
-      dc.w LIT, 5, LIT, 6, EQUALS, PRINTHEX      ; =: 0000
-   dc.w LIT, 1, LIT, -1, LESS, PRINTHEX      ; <: 0000
-   dc.w LIT, 2, LIT, 3, GREATER, PRINTHEX      ; >: 0000
-   dc.w LIT, 1, LIT, -1, ULESS, PRINTHEX      ; u<: FFFF (1 < $FFFF unsigned)
-   dc.w LIT, $1200, ZEROEQUALS, PRINTHEX      ; 0=: 0000
-   dc.w LIT, 0, ZEROLESS, PRINTHEX         ; 0<: 0000
+   dc.w LIT, 1, PRINTHEX, EMIT+1      ; 0001, then an odd jump
    dc.w HALT
 
 ;==============================================================
@@ -613,6 +563,30 @@ SerialPutc:
 	move.b d0, io_txdata2
 	rts
 
+; SerialPutHex: send d1.w as 4 hex digits, most significant first.
+; In: d1.w = value (unchanged on return). Uses d0, d2.
+SerialPutHex:
+	moveq #3, d2		; Loop countdown
+-	rol.w #4, d1
+	move.w d1, d0		; Copy to extract bottom nibble
+	andi.w #$F, d0		; Mask bottom nibble
+	addi.b #'0', d0		; 0-9 -> '0'-'9', 10-15 -> ':'-'?'
+	cmpi.b #'9', d0
+	bls.s  +      		; '9' or below: a digit, done
+	addq.b #7, d0      	; skip ':'..'@' to land on 'A'-'F'
++	jsr SerialPutc		; Output char
+	dbra d2, -              ; Loop if more nibbles left
+	rts
+
+; SerialPutString: send zero terminated string in (a1) to serial port 
+; In: a1 = string. Out: a1 = past the terminating 0. Uses d0. 
+SerialPutString:
+-	move.b (a1)+, d0
+	beq.s  +
+	jsr    SerialPutc
+	bra.s  -
++	rts
+
 ;==============================================================
 ; INTERRUPT ROUTINES
 ;==============================================================
@@ -651,6 +625,24 @@ CPU_Exception:
 	stop   #$2700				; Halt with all interrupts masked
 	rte
 
+; CPU Address error handler
+CPU_AddressError:
+	lea AddrErrMsg, a1
+	jsr SerialPutString
+	move.w 4(sp), d1
+	jsr SerialPutHex
+	lea PcMsg, a1
+	jsr SerialPutString
+	move.w 12(sp), d1
+	jsr SerialPutHex
+	moveq #char_cr, d0
+	jsr SerialPutc
+	moveq #char_lf, d0
+	jsr SerialPutc
+	movea.l #RS_START, sp   ; Empty return stack (drops the exception frame and any junk)
+	movea.l #DS_START, a6   ; Empty data stack
+	jmp HALT
+
 ;==============================================================
 ; UTILITY FUNCTIONS
 ;==============================================================
@@ -668,7 +660,7 @@ VDP_LoadRegisters:
 	; Write each table byte as a register command: 100R RRRR VVVV VVVV
 	; (R = register number, V = value) to the control port.
 	lea    VDPRegisters, a0			; Register table
-	move.w #$18-1, d0			; 24 registers (-1 for DBRA)
+	moveq #$18-1, d0			; 24 registers (-1 for DBRA)
 	move.w #$8000, d1			; Command for register 0
 -	move.b (a0)+, d1			; Value into the low byte
 	move.w d1, vdp_control			; Write register

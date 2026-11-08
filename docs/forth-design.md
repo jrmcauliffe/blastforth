@@ -83,6 +83,8 @@ Serial on controller port 2 at 4800 baud, driven from the e4thcom terminal (see 
 
 Transmit has no interrupt. `SerialPutc` waits on S-Ctrl TFUL (at most 2.08 ms per byte) and is the only code that writes TxData. A transmit queue drained from the H interrupt can replace it later (step 7, if real-time code needs non-blocking output) without changing its callers.
 
+e4thcom line handling (learned from the step 1 echo loop): e4thcom ends each line it sends with CR only, no LF (manual, "Buffered Command Line"). It also displays the typed line itself, so output sent back without a leading CR LF lands on the same screen line as the input. Line input (`accept`, step 4) must end a line on CR, and output that follows a typed line should start with CR LF.
+
 ## Memory map
 
 Work RAM `$FF0000-$FF7FFF` is outside the cell windows, so Forth cannot address it with `@`/`!`. It holds kernel-private data:
