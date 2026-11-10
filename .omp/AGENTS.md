@@ -25,7 +25,8 @@ Generated, never edit: `*.p`, `*.bin`, `*.lst`, `*.map`. Only `*.bin` is gitigno
 ## Source conventions
 
 - Match the style of `hello.asm`: tab-indented instructions, aligned trailing `;` comments, `;====` section banners with explanatory header comments, `equ` constants grouped by purpose, `macro`/`endm` helpers.
-- Use relative (anonymous) labels (`+` / `-`) for local branches, not named local labels. See the `beq +` in the TMSS check. This was a deliberate change (commit "Swap named to relative labels").
+- Use relative (anonymous) labels (`+` / `-`) for local branches. See the `beq +` in the TMSS check. This was a deliberate change (commit "Swap named to relative labels").
+- Exception: an exit reached from several branches (e.g. a word's failure path) may use an ordinary named label, prefixed with the word's label so it stays unique: `NumberFail` in `NUMBER`. Not asl's `.name` / `$$name` local labels: each relative `+` / `-` defines a hidden ordinary symbol (`__BACKn`, `__FORWn`), which becomes the new parent, so a `.fail` after a `-` is `__BACK9.fail` and branches before the `-` can't reach it.
 - Strict 68000 only: no 68010/68020+ instructions, addressing modes, or opcodes. The Mega Drive CPU is a 68000 at ~7.6 MHz.
 - Comment every hardware register value, VDP command and magic number with what it means (bit fields, addresses, units). Follow the VDP register table in `hello.asm` as the model.
 - Prefer named `equ` constants over literals for hardware addresses (VDP ports, TMSS, VRAM layout).

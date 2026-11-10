@@ -166,4 +166,4 @@ System variables (cells, top of RAM, see "Memory map"):
 
 ## Still open
 
-Nothing at the moment.
+- Guard against an invalid `base`. Forth defines 2-36; nothing checks it. In `.`, base 0 makes `divu` raise a zero-divide exception (vector 5 → `CPU_Exception`, halts) and base 1 never ends (the quotient never shrinks, so digits fill the return stack and overrun the data stack). `number` accepts any base without failing, but only digits below it. Options: check in `.` (and `number`) before converting, or check where `base` is set. Decide before user code can set `base` freely (step 5).
