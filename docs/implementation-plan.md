@@ -20,8 +20,8 @@ Record each decision in `docs/forth-design.md` when made.
    2. `count`, `type`, `accept`. Test: read a line and `type` it back.
    3. `word`. Test: split a typed line, printing each word between brackets.
    4. `find`. Test: `dup` gives the `DUP` address and `-1`; an unknown name gives `0`.
-   5. `number` and `.`. Test: `123`, `-5`, `$ff`, `%101`, a bad digit.
-   6. `depth`, `abort`, `interpret`, `quit`. Boot into `quit`; remove the boot thread and temporary words; the address-error handler jumps to `abort` instead of `halt`. Test: `2 3 + .` prints `5  ok`.
+   5. `number` and `.`. Test: `123`, `-5`, `$ff`, `%101`, a bad digit. *Done:* both in `blastforth.asm`, tested in BlastEm through the boot thread. `number`: decimal, `$`/`#`/`%` prefixes, `-`, upper and lower case, 16-bit wrap (`65536` gives 0); `12x`, `%2`, `-` and `$` fail with `c-addr 0`. `.`: bases 2, 8, 10, 16 and 36, `0`, `-32768`, `65535` prints `-1`. No `base` range check yet (see "Still open" in `docs/forth-design.md`).
+   6. `depth`, `abort`, `rp0!`, `(.")`, `interpret`, `quit`. Boot into `quit`; remove the boot thread and temporary words; the address-error handler jumps to `abort` instead of `halt`. Test: `2 3 + .` prints `5  ok`. *Done:* boot runs `abort`, which enters `quit`; `BT`, `two` and `halt` are gone; `CPU_AddressError` prints its message and jumps to `abort`. `accept` now echoes, so replies follow the input on the same line (`2 3 + . 5  ok`). Unknown words print `name ?`, underflow prints ` stack?`, both `abort`. Tested in BlastEm and on hardware. `.hex` stays as a non-standard debugging word.
 5. **Compiler.** `CREATE`, `,`, `[`, `]`, `:`, `;`, `IMMEDIATE`, `0BRANCH`. Once `: STAR 42 EMIT ;` works, most remaining work is in Forth.
 6. **Grow the system.** Control structures, number printing, strings, `WORDS`. Words the system ships with go into ROM as `DEFWORD` threads, so the RAM dictionary stays free for user code (see "Primitives" in `docs/forth-design.md`). Move a word to machine code only when speed or hardware access needs it.
 7. **Mega Drive words.** Long-address access for VDP and I/O, a screen console, joypad, VBlank.

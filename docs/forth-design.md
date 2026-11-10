@@ -83,7 +83,7 @@ Serial on controller port 2 at 4800 baud, driven from the e4thcom terminal (see 
 
 Transmit has no interrupt. `SerialPutc` waits on S-Ctrl TFUL (at most 2.08 ms per byte) and is the only code that writes TxData. A transmit queue drained from the H interrupt can replace it later (step 7, if real-time code needs non-blocking output) without changing its callers.
 
-e4thcom line handling (learned from the step 1 echo loop): e4thcom ends each line it sends with CR only, no LF (manual, "Buffered Command Line"). It also displays the typed line itself, so output sent back without a leading CR LF lands on the same screen line as the input. Line input (`accept`, step 4) must end a line on CR, and output that follows a typed line should start with CR LF.
+e4thcom line handling: e4thcom ends each line it sends with CR only, no LF (manual, "Buffered Command Line"). It displays the typed line itself, and after Enter its cursor goes back to the start of that line without a line feed, so output that is not preceded by an echo overwrites the typed line (seen in step 4.6: `7  okepth .` for `1 2 depth .`). `accept` therefore echoes each character it stores, which redraws the line in place, and echoes Enter as a space, so output follows on the same line as the input: `2 3 + . 5  ok`. Echo costs no throughput: sending a byte takes as long as receiving one (2.08 ms at 4800 baud), and receive continues by interrupt meanwhile. Mecrisp-Stellaris shows the same layout; e4thcom's `mecrisp-st.efc` plugin uses its replies (` ok.` then LF) for upload flow control and error detection.
 
 ## Memory map
 
@@ -120,8 +120,8 @@ Common words are machine code, not only a minimal eForth-style core: most of the
 | Logic | `and` `or` `xor` `invert` `lshift` `rshift` |
 | Comparison | `=` `<` `>` `u<` `0=` `0<` |
 | Memory | `@` `!` `c@` `c!` `+!` `cmove` `fill` |
-| I/O | `emit` `key` `type` `.` |
-| Outer interpreter | `accept` `word` `find` `number` `count` `depth` `abort` |
+| I/O | `emit` `key` `type` `.` `.hex` `(.")` |
+| Outer interpreter | `accept` `word` `find` `number` `count` `depth` `abort` `rp0!` |
 
 Division is symmetric (truncates toward zero), as the 68000's `divs` does: `-7 2 /mod` gives remainder `-1`, quotient `-3`. Forth 2012 allows symmetric or floored; standard `fm/mod` (floored) and `sm/rem` (symmetric) can be added later for code that needs a specific one.
 
@@ -135,17 +135,20 @@ Interfaces (classic, as in jonesforth and most texts):
 
 | Word | Stack | Behaviour |
 |---|---|---|
-| `accept` | `( c-addr +n -- +n )` | Read bytes with `SerialGetc` into the buffer until CR; store at most `+n`, drop the rest of the line. LF is ignored. No echo and no backspace handling: e4thcom edits and displays the line itself. |
+| `accept` | `( c-addr +n -- +n )` | Read bytes with `SerialGetc` into the buffer until CR; store at most `+n`, drop the rest of the line. LF is ignored. Echoes each stored byte, and a space for the CR (see "Input"). No backspace handling: e4thcom edits the line before sending it. |
 | `word` | `( char -- c-addr )` | Skip leading `char`, copy up to the next `char` or the end of the TIB into the `WORD` buffer as a counted string (length byte, then characters), advance `>in`. With `char` = space (`bl`), every byte `<= $20` counts as a delimiter, so tabs separate words. Returns length 0 at the end of the line. |
 | `find` | `( c-addr -- c-addr 0 \| xt 1 \| xt -1 )` | Walk the chain from `latest`, skip hidden headers, compare length and name bytes exactly. `xt` is the code field address. `1` = immediate, `-1` = normal. |
 | `number` | `( c-addr -- n -1 \| c-addr 0 )` | Convert a counted string. Optional prefix `$` (hex), `#` (decimal) or `%` (binary) overrides `base` for this number only; then optional `-`; then at least one digit. Digits `0-9`, `a-z`/`A-Z` = 10-35, each must be below the base. 16-bit result, overflow wraps. |
 | `.` | `( n -- )` | Print signed in `base`, then a space. |
+| `.hex` | `( x -- )` | Print unsigned as 4 hex digits (`SerialPutHex`), then a space; ignores `base`. For addresses and bit patterns. Not standard; the only unsigned/hex output until step 6 adds `u.`, `hex`, `decimal`. |
 | `count` | `( c-addr -- c-addr+1 u )` | Counted string to address and length. |
 | `type` | `( c-addr u -- )` | Send `u` bytes with `SerialPutc`. |
 | `depth` | `( -- n )` | Number of cells on the data stack before `depth` ran. |
-| `abort` | `( i*x -- )` | Empty both stacks, set `state` to 0, continue in `quit`. |
+| `abort` | `( i*x -- )` | Empty the data stack, set `state` to 0, then enter `quit` (`jmp QUIT`, its code field; `quit` never exits, so the IP `DOCOL` saves is unused). |
+| `rp0!` | `( -- ) ( R: i*x -- )` | Empty the return stack: `sp` = `RS_START`. Lets `quit`, a colon definition, reset the return stack itself. |
+| `(.")` | `( -- )` | Print the counted string stored inline in the thread after it, then continue at the next even address after the string. `quit` uses it for ` ok` and ` stack?`; step 6's `."` compiles it. In ROM threads, written with a macro: `dc.w PDOTQUOTE`, `dc.b` length and text, `align 2`. |
 
-`quit` empties the return stack, then loops: `accept` a line into the TIB, set `#tib` and `>in`, `interpret`, check the stack, print ` ok` and CR LF. An unknown word prints the word and ` ?`, then `abort`s. After each line, a negative `depth` prints ` stack?` and `abort`s. ` ok` is also what a future e4thcom plugin can wait for as flow control (see "Input").
+`quit` empties the return stack with `rp0!`, sends CR LF (ending the line after an `abort`'s message), then loops: `accept` a line into the TIB, set `#tib` and `>in`, `interpret`, check the stack, print ` ok` and CR LF. Keeping the reset in `quit` (not only in `abort`) matches the standard split: `quit` clears the return stack and keeps the data stack, `abort` clears the data stack and calls `quit`. An unknown word prints the word and ` ?`, then `abort`s. After each line, a negative `depth` prints ` stack?` and `abort`s. Every reply ends in CR LF, so the next typed line starts at column 0. ` ok` is also what a future e4thcom plugin can wait for as flow control (see "Input").
 
 ### Constants and variables
 
@@ -167,3 +170,4 @@ System variables (cells, top of RAM, see "Memory map"):
 ## Still open
 
 - Guard against an invalid `base`. Forth defines 2-36; nothing checks it. In `.`, base 0 makes `divu` raise a zero-divide exception (vector 5 → `CPU_Exception`, halts) and base 1 never ends (the quotient never shrinks, so digits fill the return stack and overrun the data stack). `number` accepts any base without failing, but only digits below it. Options: check in `.` (and `number`) before converting, or check where `base` is set. Decide before user code can set `base` freely (step 5).
+- Recover from CPU exceptions other than address error. Now reachable from the prompt: `1 0 /mod` (or `0 base ! 5 .`) raises division by zero, vector 5 → `CPU_Exception`, which does `stop #$2700` and hangs for good; illegal instruction, CHK, TRAPV and privilege violation go to the same place (e.g. `execute` on a bad address). Line-A and Line-F go to `INT_Null`, whose `rte` re-runs the faulting instruction forever. Proposed fix: handle them like `CPU_AddressError`: print a message and the PC, reset `sp`, `jmp ABORT`. These are 6-byte frames (SR at `(sp)`, PC long at `2(sp)`, low word at `4(sp)`), not the 14-byte address-error frame. Separate entry `CPU_DivZero` with its own message (`divide by 0`), sharing a tail with `CPU_Exception` (`exception`: illegal, CHK, TRAPV, privilege, line A/F); point Line-A/F at `CPU_Exception`, leave TRACE on `INT_Null`. Also restore the interrupt mask (`move.w #sr_irq_on, sr`) in the handlers, `CPU_AddressError` included, since an exception keeps the mask it interrupted. Base 1 in `.` still never ends; see the `base` item above.

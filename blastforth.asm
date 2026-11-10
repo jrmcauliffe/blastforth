@@ -275,6 +275,13 @@ DEFCONST macro name, label, value, {GLOBALSYMBOLS}
 	dc.w (value)&$FFFF	; Const value, low 16 bits
 	endm
 
+; DOTSTR: compile (.") plus an inline counted string into a ROM thread.
+DOTSTR macro text
+	dc.w PDOTQUOTE		; Print the string that follows
+	dc.b strlen(text), text	; Length byte, then the characters
+	align 2			; Next cell must be even
+	endm
+
 ; DOCOL: enter a colon word. A colon word's code field is
 ; jsr DOCOL; jsr pushes the address after itself, which is the
 ; start of the word's thread.
@@ -328,13 +335,7 @@ DOCON:
 	movea.w d7, a0		; sign-extend cell to address ($8000+ -> $FF8000+)
 	move.w (a6)+, d7	; Refill TOS
 	jmp (a0)		; jmp to code field
-				; No Next required as target word will have one	
-
-	DEFCODE "halt", HALT, 0		; Temp for testing
--	bra.s -			; Loop
-
-	DEFWORD "two", TWO, 0      ; Temp: tests execute on a colon word
-	dc.w LIT, 2, EXIT      ; ( -- 2 )
+				; No Next required as target word will have one
 
 	DEFCODE "branch", BRANCH, 0	; ( -- )
 	movea.w (a5), a5		; Set the next cell as the new instruction pointer
@@ -347,7 +348,7 @@ DOCON:
 	addq.l #2, a5		; If no, skip target cell
 	NEXT
 +	move.w (a6)+, d7	; Refill TOS
- 	movea.w (a5), a5	; Update IP with target address
+	movea.w (a5), a5	; Update IP with target address
 	NEXT
 
 ;==============================================================
@@ -381,34 +382,30 @@ CPU_EntryPoint:
 	move.w #sr_irq_on, sr
 
 	;==============================================================
-	; Banner, then run boot thread
+	; Banner, then start the interpreter
 	;==============================================================
 
 	lea    Banner, a1
 	jsr  SerialPutString
 
-	; Temp boot code
-	movea.l #DS_START, a6			; Set SP address
 	; Forth system variables (see "Outer interpreter" in docs/forth-design.md)
 	move.w #DICT_START&$FFFF, var_here	; Empty RAM dictionary: next free byte is $FF8000
 	move.w #rom_latest, var_latest		; Search starts at the newest ROM header
-	clr.w  var_state			; 0 = interpreting
 	move.w #10, var_base			; Decimal
 	clr.w  var_toin				; Parse from the start of the TIB
 	clr.w  var_ntib				; TIB empty
-	lea BT, a5
-	NEXT
+	jmp ABORT
 
 Banner:
-	dc.b "blastforth", char_cr, char_lf, 0
+	dc.b "blastforth", 0
 AddrErrMsg:
 	dc.b "addr error ", 0
 PcMsg:
 	dc.b " pc ", 0
 	align  2				; Word-align the code after the odd-length string (asl has no EVEN)
 
-	DEFCODE ".hex", PRINTHEX, 0
-        move.w d7, d1		; TOS to scratch register
+	DEFCODE ".hex", PRINTHEX, 0	; ( x -- ) 4 hex digits, unsigned, ignores base
+	move.w d7, d1		; TOS to scratch register
 	move.w (a6)+, d7	; POP TOS
 	jsr SerialPutHex	; Expects val in d1
 	moveq #' ', d0		; Output final space
@@ -529,7 +526,7 @@ PcMsg:
 
 	DEFCODE "xor", XOR, 0		; ( a b -- a^b )
 	move.w (a6)+, d0		; Source for eor must be data reg.
-	eor.w d0, d7	
+	eor.w d0, d7
 	NEXT
 
 	DEFCODE "invert", INVERT, 0	; ( a -- ~a )
@@ -539,51 +536,51 @@ PcMsg:
 	DEFCODE "lshift", LSHIFT, 0	; ( x u -- x' )
 	move.w (a6)+, d0
 	lsl.w d7, d0
-	move.w d0, d7                            	
+	move.w d0, d7
 	NEXT
 
 	DEFCODE "rshift", RSHIFT, 0	; ( x u -- x' )
 	move.w (a6)+, d0
 	lsr.w d7, d0
-	move.w d0, d7                            	
+	move.w d0, d7
 	NEXT
 
 	DEFCODE "0=", ZEROEQUALS, 0	; ( n -- flag )
 	tst d7
-	seq d7	
+	seq d7
 	ext.w d7
 	NEXT
 
 	DEFCODE "0<", ZEROLESS, 0	; ( n -- flag )
 	tst d7
-	smi d7	
+	smi d7
 	ext.w d7
 	NEXT
 
 	DEFCODE "=", EQUALS, 0		; ( a b -- flag )
-	move.w (a6)+, d0	
-	cmp.w d7, d0	
+	move.w (a6)+, d0
+	cmp.w d7, d0
 	seq d7
 	ext.w d7
 	NEXT
 
 	DEFCODE "<", LESS, 0		; ( a b -- flag )
-	move.w (a6)+, d0	
-	cmp.w d7, d0	
+	move.w (a6)+, d0
+	cmp.w d7, d0
 	slt d7
 	ext.w d7
 	NEXT
 
 	DEFCODE ">", GREATER, 0		; ( a b -- flag )
-	move.w (a6)+, d0	
-	cmp.w d7, d0	
+	move.w (a6)+, d0
+	cmp.w d7, d0
 	sgt d7
 	ext.w d7
 	NEXT
 
 	DEFCODE "u<", ULESS, 0		; ( a b -- flag )
-	move.w (a6)+, d0	
-	cmp.w d7, d0	
+	move.w (a6)+, d0
+	cmp.w d7, d0
 	scs d7
 	ext.w d7
 	NEXT
@@ -623,20 +620,20 @@ PcMsg:
 	movea.w (a6)+, a0		; Pop dst address
 	movea.w (a6)+, a1		; Pop src address
 	tst.w d7			; Check if zero bytes specified
-	beq +				; If so leave
+	beq.s +				; If so leave
 	subq #1, d7			; Decrement remaining bytes
--	move.b (a1)+, (a0)+		; Move current byte and inc	
+-	move.b (a1)+, (a0)+		; Move current byte and inc
 	dbra d7, -			; loop
 +	move.w (a6)+, d7		; Refill TOS
 	NEXT
 
 	DEFCODE "fill", FILL, 0		; ( addr u c -- )
-	move.w (a6)+, d0		; Pop fill count 
+	move.w (a6)+, d0		; Pop fill count
 	movea.w (a6)+, a0		; Pop dst address
 	tst.w d0			; Check if zero bytes specified
-	beq +				; If so leave
+	beq.s +				; If so leave
 	subq #1, d0			; Decrement remaining bytes
--	move.b d7, (a0)+		; Move byte and inc	
+-	move.b d7, (a0)+		; Move byte and inc
 	dbra d0, -			; loop
 +	move.w (a6)+, d7		; Refill TOS
 	NEXT
@@ -652,7 +649,7 @@ PcMsg:
 	DEFCODE "type", TYPE, 0		; ( c-addr u -- )
 	movea.w (a6)+, a0		; Pop c-addr
 	tst.w d7			; Check if zero bytes specified
-	beq +				; If so leave
+	beq.s +				; If so leave
 	subq #1, d7			; Decrement remaining bytes
 -	move.b (a0)+, d0		; Move current byte and inc
 	jsr SerialPutc			; Print char
@@ -671,9 +668,12 @@ PcMsg:
 	cmp.w d7, d2			; Count >= limit?
 	bhs.s -				; Full, but keep reading until CR
 	move.b d0, (a1)+		; Store received char and inc
+	jsr SerialPutc			; Echo it (d0 still holds the char)
 	addq.w #1, d2			; Inc count
 	bra.s -				; Next char
-+	move.w d2, d7			; Number stored to TOS
++	moveq #' ', d0			; Echo Enter as a space: output follows on the same line
+	jsr SerialPutc
+	move.w d2, d7			; Number stored to TOS
 	NEXT
 
 	DEFCODE "word", WORD, 0		; ( char -- c-addr )
@@ -853,15 +853,63 @@ NumberFail:
 	jsr SerialPutc			; Send to terminal
 	NEXT
 
-BT:                    ; Temporary test thread: line = "base value"
-	dc.w TIB, LIT, 128, ACCEPT, NTIB, STORE        ; Wait for a line; #tib = its length
-	dc.w LIT, 0, TOIN, STORE            ; Parse from the start
-	dc.w LIT, 13, EMIT, LIT, 10, EMIT        ; CR LF: start output below the typed line
-	dc.w LIT, 10, BASE, STORE            ; Read both words in decimal
-	dc.w LIT, $20, WORD, NUMBER, DROP        ; ( b ) base to print in
-	dc.w LIT, $20, WORD, NUMBER, DROP        ; ( b n ) value
-	dc.w SWAP, BASE, STORE, DOT            ; base = b, print n
-	dc.w BRANCH, BT                    ; Next line
+; depth: Number of cells currently on stack
+	DEFCODE "depth", DEPTH, 0	; ( -- n )
+	move.w #DS_START&$FFFF, d0	; Only need low word for diff, not real address
+	sub.w a6, d0			; Bytes in stack
+	asr.w #1, d0			; /2, each cell is 2 bytes
+	move.w d7, -(a6)		; Push old TOS down
+	move.w d0, d7			; New TOS, depth
+	NEXT
+
+; rp0!: Empty return stack
+	DEFCODE "rp0!", RPZEROSTORE, 0	; ( -- ) ( R: i*x -- )
+	movea.l #RS_START, sp		; Empty return stack
+	NEXT
+
+; abort: Empty data stack and return to interpreting, then call quit
+	DEFCODE "abort", ABORT, 0	; ( i*x -- )
+	movea.l #DS_START, a6		; Empty data stack
+	clr.w var_state			; Back to interpret mode
+	jmp QUIT			; Enter quit. no NEXT required
+
+	DEFWORD "interpret", INTERPRET, 0	; ( i*x -- j*x ) run each word in the TIB
+-	dc.w LIT, $20, WORD			; ( c-addr ) next word
+	dc.w DUP, CFETCH, ZBRANCH, ++		; Length 0: end of line
+	dc.w FIND, QDUP, ZBRANCH, +		; ( xt f | c-addr ) not found: try a number
+	dc.w DROP, EXECUTE, BRANCH, -		; Found: run it (flag unused until step 5)
++	dc.w NUMBER, ZBRANCH, ++		; ( n | c-addr ) not a number: unknown
+	dc.w BRANCH, -				; Number: leave it on the stack
++	dc.w DROP, EXIT				; Drop the empty c-addr; line done
++	dc.w COUNT, TYPE			; Print the unknown word
+	dc.w LIT, ' ', EMIT, LIT, '?', EMIT	; then " ?"
+	dc.w ABORT				; Empty the stacks, back to quit
+
+	DEFCODE "(.\x22)", PDOTQUOTE, 0		; ( -- ) print the counted string inline in the thread
+	moveq #0, d1				; Clear upper bits for length
+	move.b (a5)+, d1			; Save length of c-str
+	bra.s +					; branch to length test
+-	move.b (a5)+, d0			; next char
+	jsr SerialPutc				; Send to console
++	dbra d1, -				; dec and loop
+	move.l a5, d0				; Next address after string
+	addq.l #1, d0				; Round up for...
+	andi.w #$FFFE, d0			; ...address boundary
+	movea.l d0, a5				; IP = next cell addr.
+	NEXT
+
+	DEFWORD "quit", QUIT, 0			; ( -- ) ( R: i*x -- ) outer loop, never returns
+	dc.w RPZEROSTORE			; Empty the return stack
+	dc.w LIT, 13, EMIT, LIT, 10, EMIT	; CR LF: end the previous line (after an abort)
+-	dc.w TIB, LIT, 128, ACCEPT, NTIB, STORE	; Read a line; #tib = its length
+	dc.w LIT, 0, TOIN, STORE		; Parse from the start
+	dc.w INTERPRET				; Run it
+	dc.w DEPTH, ZEROLESS, ZBRANCH, +	; Stack underflow?
+	DOTSTR " stack?"			; Yes: complain...
+	dc.w ABORT				; ...and start again
++	DOTSTR " ok"				; No: prompt
+	dc.w LIT, 13, EMIT, LIT, 10, EMIT	; CR LF
+	dc.w BRANCH, -				; Next line
 
 ;==============================================================
 ; SERIAL I/O
@@ -919,8 +967,8 @@ SerialPutHex:
 	dbra d2, -              ; Loop if more nibbles left
 	rts
 
-; SerialPutString: send zero terminated string in (a1) to serial port 
-; In: a1 = string. Out: a1 = past the terminating 0. Uses d0. 
+; SerialPutString: send zero terminated string in (a1) to serial port
+; In: a1 = string. Out: a1 = past the terminating 0. Uses d0.
 SerialPutString:
 -	move.b (a1)+, d0
 	beq.s  +
@@ -961,7 +1009,7 @@ INT_HInterrupt:
 INT_Null:
 	rte
 
-; Exception interrupt - called if an error has occured
+; Exception interrupt - called if an error has occurred
 CPU_Exception:
 	stop   #$2700				; Halt with all interrupts masked
 	rte
@@ -976,13 +1024,9 @@ CPU_AddressError:
 	jsr SerialPutString
 	move.w 12(sp), d1
 	jsr SerialPutHex
-	moveq #char_cr, d0
-	jsr SerialPutc
-	moveq #char_lf, d0
-	jsr SerialPutc
 	movea.l #RS_START, sp   ; Empty return stack (drops the exception frame and any junk)
 	movea.l #DS_START, a6   ; Empty data stack
-	jmp HALT
+	jmp ABORT
 
 ;==============================================================
 ; UTILITY FUNCTIONS
