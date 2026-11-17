@@ -1,7 +1,7 @@
 # blastforth
 
 A Forth system that runs on the Sega Mega Drive / Genesis, written in Motorola 68000 assembly.
-`blastforth.asm` is the Forth kernel ROM, built up step by step per `docs/implementation-plan.md` (currently step 1: interrupt-driven serial echo on port 2). `hello.asm` is the original Hello World reference: vector table, ROM header, VDP init, palette, font tiles, main loop.
+`blastforth.asm` builds the Forth kernel ROM, built up step by step per `docs/implementation-plan.md` (currently step 1: interrupt-driven serial echo on port 2). It only includes the source files: `md/` holds the Mega Drive hardware code (vectors, ROM header, VDP, boot, serial, interrupts), `forth/` the kernel (memory map, macros, inner interpreter, words grouped by topic, outer interpreter). `hello.asm` is the original Hello World reference: vector table, ROM header, VDP init, palette, font tiles, main loop.
 
 ## Toolchain
 
@@ -30,12 +30,13 @@ Generated, never edit: `*.p`, `*.bin`, `*.lst`, `*.map`. Only `*.bin` is gitigno
 - Strict 68000 only: no 68010/68020+ instructions, addressing modes, or opcodes. The Mega Drive CPU is a 68000 at ~7.6 MHz.
 - Comment every hardware register value, VDP command and magic number with what it means (bit fields, addresses, units). Follow the VDP register table in `hello.asm` as the model.
 - Prefer named `equ` constants over literals for hardware addresses (VDP ports, TMSS, VRAM layout).
+- Source layout: a new word goes into the `forth/` file for its topic, or a new file added to the include list in `blastforth.asm`. Include order matters: `md/vectors.asm` and `md/header.asm` must be the first files that emit bytes ($0000, $100); `forth/macros.asm` must precede the first word file; the word files' order is the dictionary link order, and `rom_latest` follows the last one. Every header, code field and thread branch target must stay below $8000; `md/` code is reached only through 32-bit addresses and may move after the words if space runs short. Named labels and equates are global across all files.
 
 ## Hardware notes
 
 - ROM starts with the 64-entry CPU vector table, then the 256-byte header (`SEGA MEGA DRIVE ` at $100).
 - 68000 requires word-aligned code and word/long accesses on even addresses. Use `align 2` after odd-length `dc.b` data (asl has no `even`).
-- Work RAM is $FF0000-$FFFFFF (64 KiB). Initial SP (return stack top) is $FFFF00 in `blastforth.asm`; see the memory map in `docs/forth-design.md`.
+- Work RAM is $FF0000-$FFFFFF (64 KiB). Initial SP (return stack top) is $FFFF00 (`RS_START` in `forth/memmap.asm`); see the memory map in `docs/forth-design.md`.
 - VDP: control port $C00004, data port $C00000. TMSS signature must be written on hardware version != 0.
 - VDP layout in `hello.asm`: tiles at VRAM $0000, Plane A $C000, Plane B $E000; 64x32 plane, H40 (320x224).
 
