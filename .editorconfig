@@ -1,0 +1,11 @@
+root = true
+
+# Kernel sources: spaces only, instructions indented 8 columns.
+[*.asm]
+indent_style = space
+indent_size = 8
+
+# Original Hello World reference, kept as it was written (tabs, 8 wide).
+[hello.asm]
+indent_style = tab
+tab_width = 8
