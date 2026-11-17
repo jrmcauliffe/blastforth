@@ -57,7 +57,7 @@
         cmpi.b #26, d0                  ; Is it between a-z? (for bases > 16)
         bhs.s NumberFail                ; No, can't be a digit
         add.b #10, d0                   ; a = 10 etc
-+       cmp.b d2, d0                    ; is it within the current base?
++       cmp.w d2, d0                    ; is it within the current base? (word compare: d0 upper byte is 0)
         bhs.s NumberFail                ; No, can't be a valid digit
         mulu.w d2, d1                   ; total *= base (32-bit product, low word kept)
         add.w d0, d1                    ; total += digit
@@ -74,11 +74,18 @@ NumberFail:
         NEXT
 
 ; .: print n as signed number in base, followed by a space.
+; A base outside 2-36 prints " base?", sets base back to 10 and aborts:
+; base 0 would divide by zero, base 1 would push digits forever.
 ; d0 = char to send via SerialPutc
 ; d1 = zero extended value
 ; d2 = base
 ; a1 = sp before any digits are pushed
         DEFCODE ".", DOT, 0             ; ( n -- )
+        move.w var_base, d2             ; Set base from current
+        cmpi.w #2, d2                   ; Unsigned compares: negative bases count as large
+        blo.s DotBadBase                ; 0 or 1: no valid conversion
+        cmpi.w #36, d2                  ; Highest base with a digit character (0-9, A-Z)
+        bhi.s DotBadBase
         moveq #0, d1                    ; Clear upper word d1
         move.w d7, d1                   ; Number to print from TOS
         bpl.s +                         ; if >= 0, skip printing '-'
@@ -86,7 +93,6 @@ NumberFail:
         jsr SerialPutc                  ; Send to console
         neg.w d1                        ; Now make positive
 +       move.w (a6)+, d7                ; Refill TOS (n consumed)
-        move.w var_base, d2             ; Set base from current
         movea.l sp, a1                  ; Save sp to mark where digits start
 -       divu.w d2, d1                   ; d1 = rem:quot (Z = quot 0, then overwritten below)
         swap   d1                       ; d1 = quotient:remainder
@@ -105,3 +111,11 @@ NumberFail:
         moveq #' ', d0                  ; We need a trailing space
         jsr SerialPutc                  ; Send to terminal
         NEXT
+DotBadBase:
+        move.w #10, var_base            ; Back to decimal so the next . works
+        lea DotBaseMsg, a1
+        jsr SerialPutString             ; " base?"
+        jmp ABORT                       ; Empty the stacks, back to quit; no NEXT
+DotBaseMsg:
+        dc.b " base?", 0
+        align 2                         ; Word-align the next header after the odd-length string

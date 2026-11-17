@@ -12,6 +12,7 @@ The user runs e4thcom in a tmux session named `forth`. The agent just talks to t
 - Just look: `tmux capture-pane -p -t forth -S -60`.
 - Type something raw: `tmux send-keys -t forth -l -- 'text'; tmux send-keys -t forth Enter`. A trailing `;` must be written `\;`, or tmux treats it as a command separator and nothing is typed.
 - e4thcom holds its display while its input line has text in it (tested: typing `abc` without Enter froze the pane, backspacing it empty resumed the stream; nothing is sent to the target until Enter). So if the user has half-typed something, the pane looks stuck and the agent's line is appended to theirs. Clear it with BSpace keys (`tmux send-keys -t forth BSpace`); tmux's `BTab` is not understood by e4thcom and prints a stray `Z`.
+- e4thcom takes any line starting with `#` as its own directive (`#include`, …) and never sends it: `#10 base !` gives `Msg from HOST  Unknown terminal directive`. Start such lines with something else, e.g. `$a base !`.
 
 If `tmux has-session -t forth` fails, there is nothing to attach to: ask the user to start it (`./forth-connect`). Do not start another e4thcom on the same device.
 
