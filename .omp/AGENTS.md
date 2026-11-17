@@ -1,7 +1,7 @@
 # blastforth
 
 A Forth system that runs on the Sega Mega Drive / Genesis, written in Motorola 68000 assembly.
-`blastforth.asm` builds the Forth kernel ROM, built up step by step per `docs/implementation-plan.md` (currently step 1: interrupt-driven serial echo on port 2). It only includes the source files: `md/` holds the Mega Drive hardware code (vectors, ROM header, VDP, boot, serial, interrupts), `forth/` the kernel (memory map, macros, inner interpreter, words grouped by topic, outer interpreter). `hello.asm` is the original Hello World reference: vector table, ROM header, VDP init, palette, font tiles, main loop.
+`blastforth.asm` builds the Forth kernel ROM, built up step by step per `docs/implementation-plan.md` (steps 1-4 done: a REPL over serial on port 2; next is step 5, the compiler). It only includes the source files: `md/` holds the Mega Drive hardware code (vectors, ROM header, VDP, boot, serial, interrupts), `forth/` the kernel (memory map, macros, inner interpreter, words grouped by topic, outer interpreter). `hello.asm` is the original Hello World reference: vector table, ROM header, VDP init, palette, font tiles, main loop.
 
 ## Toolchain
 
@@ -20,7 +20,7 @@ p2bin blastforth.p blastforth.bin  # -> blastforth.bin (ROM image)
 ./blastem-serial blastforth.bin    # BlastEm with port 2 as a serial port (see README)
 ```
 
-Generated, never edit: `*.p`, `*.bin`, `*.lst`, `*.map`. Only `*.bin` is gitignored right now.
+Generated, never edit: `*.p`, `*.bin`, `*.lst`, `*.map`. All four are gitignored.
 
 ## Source conventions
 
@@ -44,7 +44,7 @@ Generated, never edit: `*.p`, `*.bin`, `*.lst`, `*.map`. Only `*.bin` is gitigno
 
 Decided and recorded in `docs/forth-design.md`: 16-bit direct threading (16-bit cells reaching ROM $0000-$7FFF and RAM $FF8000-$FFFFFF), registers (`a5` IP, `a6` data stack, `d7` TOS, `a7` return stack), dictionary header layout, serial input. Follow that document and keep it up to date.
 
-Decided and recorded there: RAM memory map, header flag bits, lowercase names with exact-match `FIND`, the primitive set, shipped words as ROM colon definitions, symmetric division. Open questions go at the end of that document ("Still open"). Ask the user before deciding open items; do not pick them silently.
+Decided and recorded there: RAM memory map, header flag bits, lowercase names with exact-match `FIND`, the primitive set, shipped words as ROM colon definitions, symmetric division, the `base` range check in `.`, CPU exception recovery. Open questions go at the end of that document ("Still open"). Ask the user before deciding open items; do not pick them silently.
 
 ## Replies
 

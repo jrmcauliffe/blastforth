@@ -31,12 +31,27 @@ INT_HInterrupt:
 INT_Null:
         rte
 
-; Exception interrupt - called if an error has occurred
+; CPU exceptions: print what happened and the PC, then recover to the prompt.
+; Divide by zero, CHK and TRAPV push a 6-byte frame: SR at (sp), PC long at
+; 2(sp) (low word at 4(sp)), pointing after the faulting instruction.
+; Illegal instruction, privilege violation and Line-A/F use the same frame,
+; but their PC points at the faulting instruction itself.
+; Only the PC's low word is printed: exact for ROM below $10000, and the
+; 16-bit cell form ($8xxx) for code in RAM.
+CPU_DivZero:
+        lea DivZeroMsg, a1              ; "divide by 0"
+        bra.s +
 CPU_Exception:
-        stop   #$2700                           ; Halt with all interrupts masked
-        rte
+        lea ExceptionMsg, a1            ; "exception": illegal, CHK, TRAPV, privilege, Line-A/F
++       jsr SerialPutString
+        lea PcMsg, a1
+        jsr SerialPutString
+        move.w 4(sp), d1                ; PC low word from the 6-byte frame
+        jsr SerialPutHex
+        bra.s CPU_Recover
 
-; CPU Address error handler
+; CPU Address error handler (also bus error). 14-byte frame: access address
+; low word at 4(sp), PC low word at 12(sp).
 CPU_AddressError:
         lea AddrErrMsg, a1
         jsr SerialPutString
@@ -46,6 +61,12 @@ CPU_AddressError:
         jsr SerialPutString
         move.w 12(sp), d1
         jsr SerialPutHex
-        movea.l #RS_START, sp   ; Empty return stack (drops the exception frame and any junk)
-        movea.l #DS_START, a6   ; Empty data stack
+; Shared tail: empty both stacks and restart the interpreter. An exception
+; keeps the interrupt mask it interrupted (it could be mask 7, inside
+; SerialGetc's check or an interrupt handler), so unmask IRQ 2 again or quit
+; would wait for a key that never arrives.
+CPU_Recover:
+        movea.l #RS_START, sp           ; Empty return stack (drops the exception frame and any junk)
+        movea.l #DS_START, a6           ; Empty data stack
+        move.w #sr_irq_on, sr           ; Supervisor, mask 1: serial IRQ 2 allowed again
         jmp ABORT

@@ -49,4 +49,8 @@ AddrErrMsg:
         dc.b "addr error ", 0
 PcMsg:
         dc.b " pc ", 0
+DivZeroMsg:
+        dc.b "divide by 0", 0
+ExceptionMsg:
+        dc.b "exception", 0
         align  2                                ; Word-align the code after the odd-length string (asl has no EVEN)

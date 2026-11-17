@@ -167,6 +167,20 @@ System variables (cells, top of RAM, see "Memory map"):
 
 `tib` is a constant: `$F900` (`$FFF900`).
 
+## CPU exceptions
+
+Every CPU fault Forth code can cause prints a message and the low word of the PC, then returns to the prompt like `abort`. The handlers are in `md/interrupts.asm`.
+
+- Bus error, address error → `CPU_AddressError`: `addr error XXXX pc XXXX` (access address, PC). This is a 14-byte frame, with the address low word at `4(sp)` and the PC low word at `12(sp)`.
+- Division by zero → `CPU_DivZero`: `divide by 0 pc XXXX`.
+- Illegal instruction, CHK, TRAPV, privilege violation, Line-A, Line-F → `CPU_Exception`: `exception pc XXXX`.
+- These are 6-byte frames: SR at `(sp)`, PC long at `2(sp)`, low word at `4(sp)`. For divide by zero, CHK and TRAPV the PC is the next instruction; for illegal, privilege and Line-A/F it is the faulting one.
+- Only the PC's low word is printed. That is exact for ROM below `$10000`; code in RAM shows as `8xxx`, its 16-bit cell form.
+- All three share the tail `CPU_Recover`. It empties the return stack (`sp` = `RS_START`, dropping the frame) and the data stack, sets `sr` to `sr_irq_on`, then `jmp ABORT`. A non-interrupt exception keeps the mask it interrupted, which can be 7 (inside `SerialGetc`'s check, or an interrupt handler). Without the reset, `quit` would wait for a key that never arrives.
+- TRACE, TRAP, spurious and the reserved vectors stay on `INT_Null` (`rte`). Nothing sets the trace bit, and a TRAP returns past itself.
+
+Example: `1 0 /mod` prints `divide by 0 pc 0600`, and `$4afc $8000 ! $8000 execute` (the ILLEGAL opcode) prints `exception pc 8000`. Both were tested in BlastEm, as were Line-A, Line-F and an address error. CHK, TRAPV and privilege violation share the path but were not triggered.
+
 ## Still open
 
-- Recover from CPU exceptions other than address error. Now reachable from the prompt: `1 0 /mod` raises division by zero, vector 5 → `CPU_Exception`, which does `stop #$2700` and hangs for good; illegal instruction, CHK, TRAPV and privilege violation go to the same place (e.g. `execute` on a bad address). Line-A and Line-F go to `INT_Null`, whose `rte` re-runs the faulting instruction forever. Proposed fix: handle them like `CPU_AddressError`: print a message and the PC, reset `sp`, `jmp ABORT`. These are 6-byte frames (SR at `(sp)`, PC long at `2(sp)`, low word at `4(sp)`), not the 14-byte address-error frame. Separate entry `CPU_DivZero` with its own message (`divide by 0`), sharing a tail with `CPU_Exception` (`exception`: illegal, CHK, TRAPV, privilege, line A/F); point Line-A/F at `CPU_Exception`, leave TRACE on `INT_Null`. Also restore the interrupt mask (`move.w #sr_irq_on, sr`) in the handlers, `CPU_AddressError` included, since an exception keeps the mask it interrupted.
+Nothing right now.
